@@ -145,7 +145,6 @@ int handle_overlapping_channel(struct request_ctx *ctx, int start){
             freq2 = ctx->ctx->sta_array[end]->freq;
             freq = ctx->ctx->sta_array[start]->freq;
             rssi =  handle_received_signal(ctx, start, end) - abs(ctx->ctx->noise_threshold);
-            printf("%d\n", rssi);
             if (abs(freq - freq2) < 25.0 && rssi>ctx->ctx->noise_threshold){
                 ovrl_chann++;
             }

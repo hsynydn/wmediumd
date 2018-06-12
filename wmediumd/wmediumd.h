@@ -147,6 +147,7 @@ struct station {
 	//int height;			/* Antenna Height [m] */
 	int gRandom;     /* Gaussian Random */
 	int isap; 		/* verify whether the node is ap */
+	int ovrl_fac;    /* channel overlapping factor */
 	double freq;			/* frequency [Mhz] */
 	struct wqueue queues[IEEE80211_NUM_ACS];
 	struct list_head list;

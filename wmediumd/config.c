@@ -118,7 +118,7 @@ static int calc_path_loss_free_space(void *model_param,
 	lambda = SPEED_LIGHT / f;
 	denominator = pow(lambda, 2);
 	numerator = pow((4.0 * M_PI * d), 2) * param->sL;
-	PL = 10.0 * log10(numerator / denominator);
+	PL = 10.0 * log10(numerator / denominator) + dst->ovrl_fac;
 	return PL;
 }
 /*
@@ -158,7 +158,7 @@ static int calc_path_loss_log_distance(void *model_param,
 	 * Calculate signal strength with Log-distance path loss model
 	 * https://en.wikipedia.org/wiki/Log-distance_path_loss_model
 	 */
-	PL = PL0 + 10.0 * param->path_loss_exponent * log10(d) + param->Xg;
+	PL = PL0 + 10.0 * param->path_loss_exponent * log10(d) + param->Xg + dst->ovrl_fac;
 	return PL;
 }
 /*
@@ -197,7 +197,7 @@ static int calc_path_loss_itu(void *model_param,
      * nFLOORS: number of floors
 	 */
 
-	PL = 20.0 * log10(f) + N * log10(d) + param->lF * param->nFLOORS - 28;
+	PL = 20.0 * log10(f) + N * log10(d) + param->lF * param->nFLOORS - 28 + dst->ovrl_fac;
 	return PL;
 }
 /*
@@ -238,7 +238,7 @@ static int calc_path_loss_log_normal_shadowing(void *model_param,
 	 * Calculate signal strength with Log-distance path loss model + gRandom (Gaussian random variable)
 	 * https://en.wikipedia.org/wiki/Log-distance_path_loss_model
 	 */
-	PL = PL0 + 10.0 * param->path_loss_exponent * log10(d) - gRandom;
+	PL = PL0 + 10.0 * param->path_loss_exponent * log10(d) - gRandom + dst->ovrl_fac;
 	return PL;
 }
 /*
@@ -637,6 +637,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		//station->height = HEIGHT_DEFAULT;
 		station->gRandom = GAUSS_RANDOM_DEFAULT;
 		station->isap = AP_DEFAULT;
+		station->ovrl_fac = 0;
 		station_init_queues(station);
 		list_add_tail(&station->list, &ctx->stations);
 		ctx->sta_array[i] = station;

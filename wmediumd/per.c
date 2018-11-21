@@ -319,7 +319,7 @@ static double get_error_prob_from_per_matrix(struct wmediumd *ctx, double snr,
 		    rate_idx += 4;
 
     if (mcs == 1){
-        i = 4;
+        i = 1;
         }
 
 	if (rate_idx >= rateset[i])
@@ -410,7 +410,7 @@ int index_to_rate(size_t index, u32 freq, int mcs)
     int i = 0;
 
     if (mcs == 1){
-        i = 4;
+        i = 1;
     }
 
 	if (freq > 5000)

@@ -291,8 +291,9 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 	return NULL;
 }
 
+
 void queue_frame(struct wmediumd *ctx, struct station *station,
-		 struct frame *frame)
+		 struct frame *frame, int mcs)
 {
 	struct ieee80211_hdr *hdr = (void *)frame->data;
 	u8 *dest = hdr->addr1;
@@ -317,9 +318,10 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	int retries = 0;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
+    int ack_time_usec = 0;
 
-	int ack_time_usec = pkt_duration(ctx, 14, index_to_rate(0, frame->freq)) +
-			sifs;
+    ack_time_usec = pkt_duration(ctx, 14, index_to_rate(0, frame->freq, mcs)) +
+        sifs;
 
 	/*
 	 * To determine a frame's expiration time, we compute the
@@ -360,16 +362,21 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 
 		rate_idx = frame->tx_rates[i].idx;
 
+        //int rate_id = 0;
+		//if (frame->flags & NL80211_CHAN_WIDTH_20_NOHT)
+          //     w_logf(ctx, LOG_ERR, "Error alldddddocating new message MSG!\n");
+
 		/* no more rates in MRR */
 		if (rate_idx < 0)
 			break;
 
-		error_prob = ctx->get_error_prob(ctx, snr, rate_idx,
+	    error_prob = ctx->get_error_prob(ctx, snr, rate_idx,
 						 frame->freq, frame->data_len,
-						 station, deststa);
+						 station, deststa, mcs);
 		for (j = 0; j < frame->tx_rates[i].count; j++) {
-			send_time += difs + pkt_duration(ctx, frame->data_len,
-				index_to_rate(rate_idx, frame->freq));
+
+		    send_time += difs + pkt_duration(ctx, frame->data_len,
+				index_to_rate(rate_idx, frame->freq, mcs));
 
 			retries++;
 
@@ -402,8 +409,16 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 		for (; i < frame->tx_rates_count; i++) {
 			frame->tx_rates[i].idx = -1;
 			frame->tx_rates[i].count = -1;
+			frame->tx_rates_flags[i].idx = -1;
+			frame->tx_rates_flags[i].flags = -1;
+			//w_flogf(ctx, LOG_ERR, stderr, "antesssss %d\n", frame->tx_rates[0].flags);
+			//frame->tx_rates_flags[0].flags = trans_tx_rate_flags_ieee2hwsim(
+			//			frame->tx_rates_flags[0].flags);
 		}
 		frame->flags |= HWSIM_TX_STAT_ACK;
+		//frame->tx_rates_flags->flags |= HWSIM_ATTR_TX_INFO_FLAGS;
+		//w_flogf(ctx, LOG_ERR, stderr, "0-----dg%d\n", MAC80211_HWSIM_TX_RC_USE_CTS_PROTECT);
+		//w_flogf(ctx, LOG_ERR, stderr, "adpssss-__ %d\n", frame->tx_rates_flags[0].flags);
 	}
 
 	/*
@@ -437,11 +452,14 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 	struct nl_msg *msg;
 	int ret;
 
+
 	msg = nlmsg_alloc();
 	if (!msg) {
 		w_logf(ctx, LOG_ERR, "Error allocating new message MSG!\n");
 		return -1;
 	}
+
+
 
 	if (genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, ctx->family_id,
 			0, NLM_F_REQUEST, HWSIM_CMD_TX_INFO_FRAME,
@@ -455,6 +473,9 @@ static int send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 		    frame->sender->hwaddr) ||
 	    nla_put_u32(msg, HWSIM_ATTR_FLAGS, frame->flags) ||
 	    nla_put_u32(msg, HWSIM_ATTR_SIGNAL, frame->signal) ||
+	    //nla_put(msg, HWSIM_ATTR_TX_INFO_FLAGS,
+	      //  IEEE80211_TX_MAX_RATES * sizeof(struct hwsim_tx_rate_flag),
+	        //frame->tx_rates_flags) ||
 	    nla_put(msg, HWSIM_ATTR_TX_INFO,
 		    frame->tx_rates_count * sizeof(struct hwsim_tx_rate),
 		    frame->tx_rates) ||
@@ -533,6 +554,11 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 	struct station *station;
 	u8 *dest = hdr->addr1;
 	u8 *src = frame->sender->addr;
+	int mcs = 0;
+
+	if (frame->tx_rates[0].flags & MAC80211_HWSIM_TX_RC_MCS){
+			mcs = 1;
+	}
 
 	if (frame->flags & HWSIM_TX_STAT_ACK) {
 		/* rx the frame on the dest interface */
@@ -565,7 +591,7 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 				error_prob = ctx->get_error_prob(ctx,
 					(double)snr, rate_idx, frame->freq,
 					frame->data_len, frame->sender,
-					station);
+					station, mcs);
 
 				if (drand48() <= error_prob) {
 					w_logf(ctx, LOG_INFO, "Dropped mcast from "
@@ -693,6 +719,7 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 	struct frame *frame;
 	struct ieee80211_hdr *hdr;
 	u8 *src;
+	int mcs=0;
 
 	if (gnlh->cmd == HWSIM_CMD_FRAME) {
 		pthread_rwlock_rdlock(&snr_lock);
@@ -708,9 +735,14 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 				nla_get_u32(attrs[HWSIM_ATTR_FLAGS]);
 			unsigned int tx_rates_len =
 				nla_len(attrs[HWSIM_ATTR_TX_INFO]);
+			//unsigned int tx_rates_len_flags =
+			//	nla_len(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
 			struct hwsim_tx_rate *tx_rates =
 				(struct hwsim_tx_rate *)
 				nla_data(attrs[HWSIM_ATTR_TX_INFO]);
+			struct hwsim_tx_rate_flag *tx_rates_flags =
+				(struct hwsim_tx_rate_flag *)
+				nla_data(attrs[HWSIM_ATTR_TX_INFO_FLAGS]);
 			u64 cookie = nla_get_u64(attrs[HWSIM_ATTR_COOKIE]);
 			u32 freq;
 			freq = attrs[HWSIM_ATTR_FREQ] ?
@@ -722,6 +754,7 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			if (data_len < 6 + 6 + 4)
 				goto out;
 
+            //w_flogf(ctx, LOG_ERR, stderr, "antess %d\n", tx_rates_flags[0]);
 			sender = get_station_by_addr(ctx, src);
 			if (!sender) {
 				w_flogf(ctx, LOG_ERR, stderr, "Unable to find sender station " MAC_FMT "\n", MAC_ARGS(src));
@@ -733,18 +766,32 @@ static int process_messages_cb(struct nl_msg *msg, void *arg)
 			if (!frame)
 				goto out;
 
+           // for (int i = 0; i < 1; i++)
+            //w_flogf(ctx, LOG_ERR, stderr, "idxx1 %d\n", BIT(tx_rates_flags[0].flags));
+
 			memcpy(frame->data, data, data_len);
 			frame->data_len = data_len;
 			frame->flags = flags;
 			frame->cookie = cookie;
 			frame->freq = freq;
 			frame->sender = sender;
+			memcpy(frame->tx_rates_flags, tx_rates_flags,
+			       min(tx_rates_len, sizeof(frame->tx_rates_flags)));
 			sender->freq = freq;
 			frame->tx_rates_count =
 				tx_rates_len / sizeof(struct hwsim_tx_rate);
 			memcpy(frame->tx_rates, tx_rates,
 			       min(tx_rates_len, sizeof(frame->tx_rates)));
-			queue_frame(ctx, sender, frame);
+
+			if (frame->tx_rates[0].flags & MAC80211_HWSIM_TX_RC_MCS){
+                mcs=1;
+            }
+
+			queue_frame(ctx, sender, frame, mcs);
+
+
+            w_flogf(ctx, LOG_ERR, stderr, "idxx %u\n", frame->tx_rates->idx);
+            w_flogf(ctx, LOG_ERR, stderr, "flags %u\n", frame->tx_rates[0].flags);
 		}
 out:
 		pthread_rwlock_unlock(&snr_lock);

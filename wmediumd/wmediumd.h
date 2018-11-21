@@ -28,9 +28,22 @@
 #define HWSIM_TX_CTL_NO_ACK		(1 << 1)
 #define HWSIM_TX_STAT_ACK		(1 << 2)
 
+#define MAC80211_HWSIM_TX_RC_USE_RTS_CTS 1
+#define MAC80211_HWSIM_TX_RC_USE_CTS_PROTECT (1 << 1)
+#define MAC80211_HWSIM_TX_RC_USE_SHORT_PREAMBLE	(1 << 2)
+#define MAC80211_HWSIM_TX_RC_MCS	(1 << 3)
+#define MAC80211_HWSIM_TX_RC_GREEN_FIELD	(1 << 4)
+#define MAC80211_HWSIM_TX_RC_40_MHZ_WIDTH	(1 << 5)
+#define MAC80211_HWSIM_TX_RC_DUP_DATA	(1 << 6)
+#define MAC80211_HWSIM_TX_RC_SHORT_GI	(1 << 7)
+#define MAC80211_HWSIM_TX_RC_VHT_MCS			(1 << 8)
+#define MAC80211_HWSIM_TX_RC_80_MHZ_WIDTH	(1 << 9)
+#define MAC80211_HWSIM_TX_RC_160_MHZ_WIDTH	(1 << 10)
+
 #define HWSIM_CMD_REGISTER 1
 #define HWSIM_CMD_FRAME 2
 #define HWSIM_CMD_TX_INFO_FRAME 3
+#define BIT(n) (1UL << (n))
 
 /**
  * enum hwsim_attrs - hwsim netlink attributes
@@ -93,6 +106,7 @@ enum {
 	HWSIM_ATTR_NO_VIF,
 	HWSIM_ATTR_FREQ,
 	HWSIM_ATTR_PAD,
+	HWSIM_ATTR_TX_INFO_FLAGS,
 	__HWSIM_ATTR_MAX,
 };
 #define HWSIM_ATTR_MAX (__HWSIM_ATTR_MAX - 1)
@@ -114,8 +128,12 @@ enum {
 #include "ieee80211.h"
 
 typedef uint8_t u8;
+typedef uint16_t u16;
 typedef uint32_t u32;
 typedef uint64_t u64;
+typedef int8_t s8;
+typedef int32_t s32;
+typedef u32 codel_time_t;
 
 #define TIME_FMT "%lld.%06lld"
 #define TIME_ARGS(a) ((unsigned long long)(a)->tv_sec), ((unsigned long long)(a)->tv_nsec/1000)
@@ -135,6 +153,14 @@ struct wqueue {
 	int cw_min;
 	int cw_max;
 };
+
+/* there are 40 bytes if you don't need the rateset to be kept */
+#define IEEE80211_TX_INFO_DRIVER_DATA_SIZE 40
+
+/* if you do need the rateset, then you have less space */
+#define IEEE80211_TX_INFO_RATE_DRIVER_DATA_SIZE 24
+
+
 
 struct station {
 	int index;
@@ -180,7 +206,7 @@ struct wmediumd {
 	int (*get_link_snr)(struct wmediumd *, struct station *,
 			    struct station *);
 	double (*get_error_prob)(struct wmediumd *, double, unsigned int, u32,
-				 int, struct station *, struct station *);
+				 int, struct station *, struct station *, int mcs);
 	int (*calc_path_loss)(void *, struct station *,
 			      struct station *);
 	void (*move_stations)(struct wmediumd *);
@@ -189,10 +215,19 @@ struct wmediumd {
 	u8 log_lvl;
 };
 
+
 struct hwsim_tx_rate {
 	signed char idx;
 	unsigned char count;
+	uint16_t flags;
 };
+
+struct hwsim_tx_rate_flag {
+	signed char idx;
+	uint16_t flags;
+};
+
+
 
 struct frame {
 	struct list_head list;		/* frame queue list */
@@ -206,9 +241,15 @@ struct frame {
 	int tx_rates_count;
 	struct station *sender;
 	struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];
+	struct hwsim_tx_rate_flag tx_rates_flags[IEEE80211_TX_MAX_RATES];
 	size_t data_len;
 	u8 data[0];			/* frame contents */
 };
+
+static inline struct ieee80211_tx_info *IEEE80211_SKB_CB(struct wmediumd *ctx)
+{
+	return (struct ieee80211_tx_info*)ctx->cb;
+}
 
 struct log_distance_model_param {
 	double path_loss_exponent;
@@ -240,14 +281,15 @@ struct intf_info {
 	double prob_col;
 };
 
+
 void station_init_queues(struct station *station);
 double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
-			       int frame_len);
+			       int frame_len, int mcs);
 bool timespec_before(struct timespec *t1, struct timespec *t2);
 int set_default_per(struct wmediumd *ctx);
 int read_per_file(struct wmediumd *ctx, const char *file_name);
 int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
 int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
-int index_to_rate(size_t index, u32 freq);
+int index_to_rate(size_t index, u32 freq, int mcs);
 
 #endif /* WMEDIUMD_H_ */

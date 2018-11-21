@@ -61,15 +61,15 @@ static int get_link_snr_from_snr_matrix(struct wmediumd *ctx,
 static double _get_error_prob_from_snr(struct wmediumd *ctx, double snr,
 					   unsigned int rate_idx, u32 freq,
 					   int frame_len,
-				       struct station *src, struct station *dst)
+				       struct station *src, struct station *dst, int mcs)
 {
-	return get_error_prob_from_snr(snr, rate_idx, freq, frame_len);
+	return get_error_prob_from_snr(snr, rate_idx, freq, frame_len, mcs);
 }
 
 static double get_error_prob_from_matrix(struct wmediumd *ctx, double snr,
 					 unsigned int rate_idx, u32 freq,
 					 int frame_len, struct station *src,
-					 struct station *dst)
+					 struct station *dst, int mcs)
 {
 	if (dst == NULL) // dst is multicast. returned value will not be used.
 		return 0.0;
@@ -727,8 +727,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 
 	ctx->per_matrix = NULL;
 	ctx->per_matrix_row_num = 0;
-	if (per_file && read_per_file(ctx, per_file))
-		goto fail;
+	read_per_file(ctx, per_file);
 
 	ctx->error_prob_matrix = NULL;
 	if (error_probs) {

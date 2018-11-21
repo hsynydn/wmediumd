@@ -32,7 +32,7 @@ struct rate {
 /*
  * rate sets are defined in drivers/net/wireless/mac80211_hwsim.c#hwsim_rates.
  */
-static struct rate rateset[] = {
+static struct rate rateset_abg[] = {
 	/*
 	 * XXX:
 	 * For rate = 1, 2, 5.5, 11 Mbps, we will use mqam and fec of closest
@@ -51,9 +51,9 @@ static struct rate rateset[] = {
 	{ .mbps = 480, .mqam = 64, .fec = FEC_RATE_2_3 },
 	{ .mbps = 540, .mqam = 64, .fec = FEC_RATE_3_4 },
 };
-static size_t rate_len = ARRAY_SIZE(rateset);
+static size_t rate_len_abg = ARRAY_SIZE(rateset_abg);
 
-static struct rate rateset_GI_20[] = {
+static struct rate rateset_gi_20[] = {
 	/*
 	 * For 802.11n: Based on http://mcsindex.com/
 	 *
@@ -75,9 +75,9 @@ static struct rate rateset_GI_20[] = {
 	{ .mbps = 1170, .mqam = 64, .fec = FEC_RATE_3_4 },
 	{ .mbps = 1300, .mqam = 64, .fec = FEC_RATE_4_5 },
 };
-static size_t rate_len_GI_20 = ARRAY_SIZE(rateset_GI_20);
+static size_t rate_len_gi_20 = ARRAY_SIZE(rateset_gi_20);
 
-static struct rate rateset_SGI_20[] = {
+static struct rate rateset_sgi_20[] = {
 	/*
 	 * For 802.11n: Based on http://mcsindex.com/
 	 *
@@ -99,9 +99,9 @@ static struct rate rateset_SGI_20[] = {
 	{ .mbps = 1303, .mqam = 64, .fec = FEC_RATE_3_4 },
 	{ .mbps = 1444, .mqam = 64, .fec = FEC_RATE_5_6 },
 };
-static size_t rate_len_SGI_20 = ARRAY_SIZE(rateset_SGI_20);
+static size_t rate_len_sgi_20 = ARRAY_SIZE(rateset_sgi_20);
 
-static struct rate rateset_GI_40[] = {
+static struct rate rateset_gi_40[] = {
 	/*
 	 * For 802.11n: Based on http://mcsindex.com/
 	 *
@@ -123,9 +123,9 @@ static struct rate rateset_GI_40[] = {
 	{ .mbps = 2430, .mqam = 64, .fec = FEC_RATE_3_4 },
 	{ .mbps = 2700, .mqam = 64, .fec = FEC_RATE_5_6 },
 };
-static size_t rate_len_GI_40 = ARRAY_SIZE(rateset_GI_40);
+static size_t rate_len_gi_40 = ARRAY_SIZE(rateset_gi_40);
 
-static struct rate rateset_SGI_40[] = {
+static struct rate rateset_sgi_40[] = {
 	/*
 	 * For 802.11n: Based on http://mcsindex.com/
 	 *
@@ -147,7 +147,7 @@ static struct rate rateset_SGI_40[] = {
 	{ .mbps = 2700, .mqam = 64, .fec = FEC_RATE_3_4 },
 	{ .mbps = 3000, .mqam = 64, .fec = FEC_RATE_5_6 },
 };
-static size_t rate_len_SGI_40 = ARRAY_SIZE(rateset_SGI_40);
+static size_t rate_len_sgi_40 = ARRAY_SIZE(rateset_sgi_40);
 
 static double n_choose_k(double n, double k)
 {
@@ -262,11 +262,16 @@ static double per(double ber, enum fec_rate rate, int frame_len)
 }
 
 double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
-							   int frame_len)
+							   int frame_len, int mcs)
 {
-	int m;
+	int m, i=0;
 	enum fec_rate fec;
 	double ber;
+	const size_t ratelen[] = {rate_len_abg, rate_len_gi_20,
+	                          rate_len_gi_40, rate_len_sgi_20,
+	                          rate_len_sgi_40};
+    struct rate *rateset[] = {rateset_abg, rateset_gi_20, rateset_sgi_20,
+                               rateset_gi_40, rateset_sgi_40};
 
 	if (snr <= 0.0)
 		return 1.0;
@@ -274,11 +279,15 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 	if (freq > 5000)
 		    rate_idx += 4;
 
-	if (rate_idx >= rate_len)
+    if (mcs == 1){
+        i=4;
+        }
+
+	if (rate_idx >= ratelen[i])
 		return 1.0;
 
-	m = rateset[rate_idx].mqam;
-	fec = rateset[rate_idx].fec;
+	m = rateset[i][rate_idx].mqam;
+    fec = rateset[i][rate_idx].fec;
 
 	if (m == 2)
 		ber = bpsk_ber(snr);
@@ -291,9 +300,12 @@ double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 static double get_error_prob_from_per_matrix(struct wmediumd *ctx, double snr,
 						 unsigned int rate_idx, u32 freq,
 					     int frame_len, struct station *src,
-					     struct station *dst)
+					     struct station *dst, int mcs)
 {
-	int signal_idx;
+    const size_t rateset[] = {rate_len_abg, rate_len_gi_20,
+	                          rate_len_gi_40, rate_len_sgi_20,
+	                          rate_len_sgi_40};
+	int signal_idx, i=0;
 
 	signal_idx = snr + NOISE_LEVEL - ctx->per_matrix_signal_min;
 
@@ -306,10 +318,14 @@ static double get_error_prob_from_per_matrix(struct wmediumd *ctx, double snr,
 	if (freq > 5000)
 		    rate_idx += 4;
 
-	if (rate_idx >= rate_len)
+    if (mcs == 1){
+        i = 4;
+        }
+
+	if (rate_idx >= rateset[i])
 		return 1.0;
 
-	return ctx->per_matrix[signal_idx * rate_len + rate_idx];
+	return ctx->per_matrix[signal_idx * rateset[i] + rate_idx];
 }
 
 int read_per_file(struct wmediumd *ctx, const char *file_name)
@@ -317,68 +333,90 @@ int read_per_file(struct wmediumd *ctx, const char *file_name)
 	FILE *fp;
 	char line[256];
 	int signal;
-	size_t i;
+	size_t i, j;
 	float *temp;
+	int size = strlen(file_name) + 6;
+	char *filename = malloc(size);
+	const char *files[] = {"ax", "n_gi20", "n_gi40", "n_sgi20", "n_sgi40"};
+	const size_t rate_len[] = {rate_len_abg, rate_len_gi_20,
+	                          rate_len_gi_40, rate_len_sgi_20,
+	                          rate_len_sgi_40};
+	size_t n_files = sizeof(files)/sizeof(files[0]);
 
-	fp = fopen(file_name, "r");
-	if (fp == NULL) {
-		w_flogf(ctx, LOG_ERR, stderr,
-			"fopen failed %s\n", strerror(errno));
-		return EXIT_FAILURE;
-	}
+    for (j=0;j<n_files;j++){
+        strcpy (filename, file_name);
+        strcat (filename, files[j]);
 
-	ctx->per_matrix_signal_min = 1000;
-	while (fscanf(fp, "%s", line) != EOF){
-		if (line[0] == '#') {
-			if (fgets(line, sizeof(line), fp) == NULL) {
-				w_flogf(ctx, LOG_ERR, stderr,
-					"Failed to read comment line\n");
-				return EXIT_FAILURE;
-			}
-			continue;
-		}
+        fp = fopen(filename, "r");
+        if (fp == NULL) {
+            w_flogf(ctx, LOG_ERR, stderr,
+                "fopen failed %s\n", strerror(errno));
+            return EXIT_FAILURE;
+        }
 
-		signal = atoi(line);
-		if (ctx->per_matrix_signal_min > signal)
-			ctx->per_matrix_signal_min = signal;
+        ctx->per_matrix_signal_min = 1000;
+        while (fscanf(fp, "%s", line) != EOF){
+            if (line[0] == '#') {
+                if (fgets(line, sizeof(line), fp) == NULL) {
+                    w_flogf(ctx, LOG_ERR, stderr,
+                        "Failed to read comment line\n");
+                    return EXIT_FAILURE;
+                }
+                continue;
+            }
 
-		if (signal - ctx->per_matrix_signal_min < 0) {
-			w_flogf(ctx, LOG_ERR, stderr,
-				"%s: invalid signal=%d\n", __func__, signal);
-			return EXIT_FAILURE;
-		}
+            signal = atoi(line);
+            if (ctx->per_matrix_signal_min > signal)
+                ctx->per_matrix_signal_min = signal;
 
-		temp = realloc(ctx->per_matrix, sizeof(float) * rate_len *
-				++ctx->per_matrix_row_num);
-		if (temp == NULL) {
-			w_flogf(ctx, LOG_ERR, stderr,
-				"Out of memory(PER file)\n");
-			return EXIT_FAILURE;
-		}
-		ctx->per_matrix = temp;
+            if (signal - ctx->per_matrix_signal_min < 0) {
+                w_flogf(ctx, LOG_ERR, stderr,
+                    "%s: invalid signal=%d\n", __func__, signal);
+                return EXIT_FAILURE;
+            }
 
-		for (i = 0; i < rate_len; i++) {
-			if (fscanf(fp, "%f", &ctx->per_matrix[
-				(signal - ctx->per_matrix_signal_min) *
-				rate_len + i]) == EOF) {
-				w_flogf(ctx, LOG_ERR, stderr,
-					"Not enough rate found\n");
-				return EXIT_FAILURE;
-			}
-		}
-	}
+            temp = realloc(ctx->per_matrix, sizeof(float) * rate_len[j] *
+                    ++ctx->per_matrix_row_num);
+            if (temp == NULL) {
+                w_flogf(ctx, LOG_ERR, stderr,
+                    "Out of memory(PER file)\n");
+                return EXIT_FAILURE;
+            }
+            ctx->per_matrix = temp;
 
-	ctx->get_error_prob = get_error_prob_from_per_matrix;
+            for (i = 0; i < rate_len[j]; i++) {
+                if (fscanf(fp, "%f", &ctx->per_matrix[
+                    (signal - ctx->per_matrix_signal_min) *
+					rate_len[j] + i]) == EOF) {
+                    w_flogf(ctx, LOG_ERR, stderr,
+                        "Not enough rate found\n");
+                    return EXIT_FAILURE;
+                }
+            }
+        }
+        ctx->get_error_prob = get_error_prob_from_per_matrix;
+    }
 
 	return EXIT_SUCCESS;
 }
 
-int index_to_rate(size_t index, u32 freq)
+int index_to_rate(size_t index, u32 freq, int mcs)
 {
+    const size_t rate_len[] = {rate_len_abg, rate_len_gi_20,
+	                          rate_len_gi_40, rate_len_sgi_20,
+	                          rate_len_sgi_40};
+    struct rate *rateset[] = {rateset_abg, rateset_gi_20, rateset_sgi_20,
+                               rateset_gi_40, rateset_sgi_40};
+    int i = 0;
+
+    if (mcs == 1){
+        i = 4;
+    }
+
 	if (freq > 5000)
 		index += 4;
-	if (index >= rate_len)
-		index = rate_len - 1;
+	if (index >= rate_len[i])
+		index = rate_len[i] - 1;
 
-	return rateset[index].mbps;
+	return rateset[i][index].mbps;
 }

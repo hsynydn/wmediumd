@@ -29,12 +29,24 @@ struct request_ctx {
     int sock_fd;
 };
 
+struct accept_context {
+    struct wmediumd *wctx;
+    int server_socket;
+    int client_socket;
+    pthread_t *thread;
+};
+
+void *handle_accepted_connection(void *d_ptr);
+int create_listen_socket(struct wmediumd *ctx);
+int accept_connection(int listen_soc);
+
 /**
  * Start the server using the given wmediumd context in a background task
  * @param ctx The wmediumd context
  * @return 0 on success
  */
 int start_wserver(struct wmediumd *ctx);
+void *run_wserver(void *ctx);
 
 /**
  * Stop the server if active

@@ -31,6 +31,7 @@
 #define HWSIM_CMD_REGISTER 1
 #define HWSIM_CMD_FRAME 2
 #define HWSIM_CMD_TX_INFO_FRAME 3
+#define BIT(nr)	(1UL << (nr))
 
 /**
  * enum hwsim_attrs - hwsim netlink attributes
@@ -93,9 +94,58 @@ enum {
 	HWSIM_ATTR_NO_VIF,
 	HWSIM_ATTR_FREQ,
 	HWSIM_ATTR_PAD,
+	HWSIM_ATTR_TX_INFO_FLAGS,
+	HWSIM_ATTR_PERM_ADDR,
+	HWSIM_ATTR_IFTYPE_SUPPORT,
+	HWSIM_ATTR_CIPHER_SUPPORT,
 	__HWSIM_ATTR_MAX,
 };
 #define HWSIM_ATTR_MAX (__HWSIM_ATTR_MAX - 1)
+
+/**
+ * enum hwsim_tx_rate_flags - per-rate flags set by the rate control algorithm.
+ *	Inspired by structure mac80211_rate_control_flags. New flags may be
+ *	appended, but old flags not deleted, to keep compatibility for
+ *	userspace.
+ *
+ * These flags are set by the Rate control algorithm for each rate during tx,
+ * in the @flags member of struct ieee80211_tx_rate.
+ *
+ * @MAC80211_HWSIM_TX_RC_USE_RTS_CTS: Use RTS/CTS exchange for this rate.
+ * @MAC80211_HWSIM_TX_RC_USE_CTS_PROTECT: CTS-to-self protection is required.
+ *	This is set if the current BSS requires ERP protection.
+ * @MAC80211_HWSIM_TX_RC_USE_SHORT_PREAMBLE: Use short preamble.
+ * @MAC80211_HWSIM_TX_RC_MCS: HT rate.
+ * @MAC80211_HWSIM_TX_RC_VHT_MCS: VHT MCS rate, in this case the idx field is
+ *	split into a higher 4 bits (Nss) and lower 4 bits (MCS number)
+ * @MAC80211_HWSIM_TX_RC_GREEN_FIELD: Indicates whether this rate should be used
+ *	in Greenfield mode.
+ * @MAC80211_HWSIM_TX_RC_40_MHZ_WIDTH: Indicates if the Channel Width should be
+ *	40 MHz.
+ * @MAC80211_HWSIM_TX_RC_80_MHZ_WIDTH: Indicates 80 MHz transmission
+ * @MAC80211_HWSIM_TX_RC_160_MHZ_WIDTH: Indicates 160 MHz transmission
+ *	(80+80 isn't supported yet)
+ * @MAC80211_HWSIM_TX_RC_DUP_DATA: The frame should be transmitted on both of
+ *	the adjacent 20 MHz channels, if the current channel type is
+ *	NL80211_CHAN_HT40MINUS or NL80211_CHAN_HT40PLUS.
+ * @MAC80211_HWSIM_TX_RC_SHORT_GI: Short Guard interval should be used for this
+ *	rate.
+ */
+enum hwsim_tx_rate_flags {
+	MAC80211_HWSIM_TX_RC_USE_RTS_CTS		= BIT(0),
+	MAC80211_HWSIM_TX_RC_USE_CTS_PROTECT		= BIT(1),
+	MAC80211_HWSIM_TX_RC_USE_SHORT_PREAMBLE	= BIT(2),
+
+ 	/* rate index is an HT/VHT MCS instead of an index */
+	MAC80211_HWSIM_TX_RC_MCS			= BIT(3),
+	MAC80211_HWSIM_TX_RC_GREEN_FIELD		= BIT(4),
+	MAC80211_HWSIM_TX_RC_40_MHZ_WIDTH		= BIT(5),
+	MAC80211_HWSIM_TX_RC_DUP_DATA		= BIT(6),
+	MAC80211_HWSIM_TX_RC_SHORT_GI		= BIT(7),
+	MAC80211_HWSIM_TX_RC_VHT_MCS			= BIT(8),
+	MAC80211_HWSIM_TX_RC_80_MHZ_WIDTH		= BIT(9),
+	MAC80211_HWSIM_TX_RC_160_MHZ_WIDTH		= BIT(10),
+};
 
 #define VERSION_NR 1
 
@@ -109,9 +159,14 @@ enum {
 #include <stdbool.h>
 #include <syslog.h>
 #include <stdio.h>
+#include <netlink/netlink.h>
+#include <netlink/genl/genl.h>
+#include <netlink/genl/ctrl.h>
+#include <netlink/genl/family.h>
 
 #include "list.h"
 #include "ieee80211.h"
+#include "thpool.h"
 
 typedef uint8_t u8;
 typedef uint32_t u32;
@@ -130,6 +185,24 @@ typedef uint64_t u64;
 #define NOISE_LEVEL	(-91)
 #define CCA_THRESHOLD	(-90)
 
+/**
+ * struct hwsim_tx_rate - rate selection/status
+ *
+ * @idx: rate index to attempt to send with
+ * @count: number of tries in this rate before going to the next rate
+ *
+ * A value of -1 for @idx indicates an invalid rate and, if used
+ * in an array of retry rates, that no more rates should be tried.
+ *
+ * When used for transmit status reporting, the driver should
+ * always report the rate and number of retries used.
+ *
+ */
+struct hwsim_tx_rate_flag {
+	signed char idx;
+	unsigned short flags;
+};
+
 struct wqueue {
 	struct list_head frames;
 	int cw_min;
@@ -144,7 +217,6 @@ struct station {
 	double dir_x, dir_y;		/* direction of the station [meter per MOVE_INTERVAL] */
 	int tx_power;			/* transmission power [dBm] */
 	int gain;			/* Antenna Gain [dBm] */
-	//int height;			/* Antenna Height [m] */
 	int gRandom;     /* Gaussian Random */
 	int isap; 		/* verify whether the node is ap */
 	double freq;			/* frequency [Mhz] */
@@ -153,10 +225,6 @@ struct station {
 };
 
 struct wmediumd {
-	int timerfd;
-
-	struct nl_sock *sock;
-
 	int num_stas;
 	struct list_head stations;
 	struct station **sta_array;
@@ -187,7 +255,18 @@ struct wmediumd {
 	int (*get_fading_signal)(struct wmediumd *);
 
 	u8 log_lvl;
+
+	struct timespec min_expires;	/* frame delivery (absolute) */
+	bool min_expires_set;
+	threadpool thpool;
 };
+
+typedef struct thpool_arg {
+	void *ctx;
+	//struct nl_msg* msg;
+	void *station;
+	void *frame;
+} thpool_arg_data, *thpool_arg_data_ptr;
 
 struct hwsim_tx_rate {
 	signed char idx;
@@ -204,8 +283,10 @@ struct frame {
 	int signal;
 	int duration;
 	int tx_rates_count;
+	int tx_rates_flag_count;
 	struct station *sender;
 	struct hwsim_tx_rate tx_rates[IEEE80211_TX_MAX_RATES];
+	struct hwsim_tx_rate_flag tx_rates_flag[IEEE80211_TX_MAX_RATES];
 	size_t data_len;
 	u8 data[0];			/* frame contents */
 };
@@ -249,5 +330,6 @@ int read_per_file(struct wmediumd *ctx, const char *file_name);
 int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
 int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
 int index_to_rate(size_t index, u32 freq);
+int index_to_ht_rate(size_t index);
 
 #endif /* WMEDIUMD_H_ */

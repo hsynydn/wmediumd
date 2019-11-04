@@ -318,8 +318,8 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
-	int ack_time_usec = pkt_duration(ctx, 14, index_to_rate(0, frame->freq)) +
-			sifs;
+	//int ack_time_usec = pkt_duration(ctx, 14, index_to_rate(0, frame->freq)) +
+		//	sifs;
 
 	/*
 	 * To determine a frame's expiration time, we compute the
@@ -368,10 +368,10 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 						 frame->freq, frame->data_len,
 						 station, deststa);
 		for (j = 0; j < frame->tx_rates[i].count; j++) {
-			send_time += difs + pkt_duration(ctx, frame->data_len,
-				index_to_rate(rate_idx, frame->freq));
+			//send_time += difs + pkt_duration(ctx, frame->data_len,
+				//index_to_rate(rate_idx, frame->freq));
 
-			retries++;
+			//retries++;
 
 			/* skip ack/backoff/retries for noack frames */
 			if (noack) {
@@ -394,7 +394,7 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 				is_acked = true;
 				break;
 			}
-			send_time += ack_time_usec;
+			//send_time += ack_time_usec;
 		}
 	}
 	if (is_acked) {
@@ -411,14 +411,14 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	 * (or now, if none).
 	 */
 	target = now;
-	for (i = 0; i <= ac; i++) {
-		list_for_each_entry(tmpsta, &ctx->stations, list) {
-			tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
-						       struct frame, list);
-			if (tail && timespec_before(&target, &tail->expires))
-				target = tail->expires;
-		}
-	}
+	//for (i = 0; i <= ac; i++) {
+	//	list_for_each_entry(tmpsta, &ctx->stations, list) {
+	//		tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
+	//					       struct frame, list);
+	//		if (tail && timespec_before(&target, &tail->expires))
+	//			target = tail->expires;
+	//	}
+	//}
 
 	timespec_add_usec(&target, send_time);
 

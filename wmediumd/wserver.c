@@ -213,7 +213,7 @@ int handle_position_update_request(struct request_ctx *ctx, const position_updat
 			}
         }
 
-        w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing Position update: for=" MAC_FMT ", position=%f,%f,%f\n",
+        w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing Position update for " MAC_FMT ", position=%f,%f,%f\n",
 			   MAC_ARGS(request->sta_addr), request->posX, request->posY, request->posZ);
 
 		calc_signal(ctx);
@@ -244,7 +244,7 @@ int handle_txpower_update_request(struct request_ctx *ctx, const txpower_update_
 			}
         }
 
-		w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing TxPower update: for=" MAC_FMT ", txpower=%d\n",
+		w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing TxPower update for " MAC_FMT ", txpower=%d\n",
 			   MAC_ARGS(request->sta_addr), request->txpower_);
 
 		calc_signal(ctx);
@@ -275,7 +275,7 @@ int handle_gaussian_random_update_request(struct request_ctx *ctx, const gaussia
 			}
         }
 
-		w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing Gaussian Random update: for=" MAC_FMT ", gRandom=%d\n",
+		w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing Gaussian Random update for " MAC_FMT ", gRandom=%d\n",
 			   MAC_ARGS(request->sta_addr), request->gaussian_random_);
 
 		calc_signal(ctx);

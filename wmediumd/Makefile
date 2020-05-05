@@ -7,7 +7,9 @@ NL3FOUND := $(shell $(PKG_CONFIG) --atleast-version=3 libnl-3.0 && echo Y)
 NL31FOUND := $(shell $(PKG_CONFIG) --exact-version=3.1 libnl-3.1 && echo Y)
 NL3xFOUND := $(shell $(PKG_CONFIG) --atleast-version=3.2 libnl-3.0 && echo Y)
 
-CFLAGS = -g -std=gnu11 -Wall -Wextra -Wno-unused-parameter -O2
+CFLAGS = -g -std=gnu11 -Wall -Wextra -Wno-unused-parameter -O2 -Iinc
+CFLAGS += -MMD -MP
+CFLAGS += -Wno-format-zero-length
 LDFLAGS = -levent -lm
 
 ifeq ($(NL2FOUND),Y)
@@ -45,14 +47,16 @@ endif
 LDFLAGS += $(shell $(PKG_CONFIG) --libs $(NLLIBNAME))
 CFLAGS += $(shell $(PKG_CONFIG) --cflags $(NLLIBNAME))
 
-CFLAGS+=-DVERSION_STR=$(VERSION_STR)
-LDFLAGS+=-lconfig -lpthread
-OBJECTS=wmediumd.o wserver.o config.o per.o wmediumd_dynamic.o wserver_messages.o wserver_messages_network.o
+CFLAGS += -DVERSION_STR=$(VERSION_STR)
+LDFLAGS += -lconfig -lpthread
+OBJECTS = wmediumd.o wserver.o config.o per.o wmediumd_dynamic.o wserver_messages.o wserver_messages_network.o
+OBJECTS += lib/loop.o lib/sched.o lib/schedctrl.o
+OBJECTS += lib/uds.o lib/vhost.o lib/wallclock.o
 
-all: wmediumd 
+all: wmediumd
 
-wmediumd: $(OBJECTS) 
-	$(CC) -o $@ $(OBJECTS) $(LDFLAGS) 
- 
-clean: 
+wmediumd: $(OBJECTS)
+	$(CC) -o $@ $(OBJECTS) $(LDFLAGS)
+
+clean:
 	rm -f $(OBJECTS) wmediumd

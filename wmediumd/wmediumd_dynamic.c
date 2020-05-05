@@ -75,32 +75,32 @@ int add_station(struct wmediumd *ctx, const u8 addr[]) {
     }
 
     // Fill last lines with default snr
-    for (size_t x = 0; x < newnum; x++) {
-        if (ctx->station_err_matrix != NULL) {
-            ctx->station_err_matrix[x * newnum + oldnum] = malloc(
-                    SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX * sizeof(double));
-            for (int i = 0; i < SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX; i++) {
-                ctx->station_err_matrix[x * newnum + oldnum][i] = DEFAULT_FULL_DYNAMIC_ERRPROB;
-            }
-        } else if (ctx->error_prob_matrix != NULL) {
-            ctx->error_prob_matrix[x * newnum + oldnum] = DEFAULT_DYNAMIC_ERRPROB;
-        } else {
-            ctx->snr_matrix[x * newnum + oldnum] = DEFAULT_DYNAMIC_SNR;
-        }
-    }
-    for (size_t y = 0; y < newnum; y++) {
-        if (ctx->station_err_matrix != NULL) {
-            ctx->station_err_matrix[oldnum * newnum + y] = malloc(
-                    SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX * sizeof(double));
-            for (int i = 0; i < SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX; i++) {
-                ctx->station_err_matrix[oldnum * newnum + y][i] = DEFAULT_FULL_DYNAMIC_ERRPROB;
-            }
-        } else if (ctx->error_prob_matrix != NULL) {
-            ctx->error_prob_matrix[oldnum * newnum + y] = DEFAULT_DYNAMIC_ERRPROB;
-        } else {
-            ctx->snr_matrix[oldnum * newnum + y] = DEFAULT_DYNAMIC_SNR;
-        }
-    }
+	for (size_t x = 0; x < newnum; x++) {
+		if (ctx->station_err_matrix != NULL) {
+			ctx->station_err_matrix[x * newnum + oldnum] = malloc(
+					SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX * sizeof(double));
+			for (int i = 0; i < SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX; i++) {
+				ctx->station_err_matrix[x * newnum + oldnum][i] = DEFAULT_FULL_DYNAMIC_ERRPROB;
+			}
+		} else if (ctx->error_prob_matrix != NULL) {
+			ctx->error_prob_matrix[x * newnum + oldnum] = DEFAULT_DYNAMIC_ERRPROB;
+		} else {
+			ctx->snr_matrix[x * newnum + oldnum] = DEFAULT_DYNAMIC_SNR;
+		}
+	}
+	for (size_t y = 0; y < newnum; y++) {
+		if (ctx->station_err_matrix != NULL) {
+			ctx->station_err_matrix[oldnum * newnum + y] = malloc(
+					SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX * sizeof(double));
+			for (int i = 0; i < SPECIFIC_MATRIX_MAX_SIZE_IDX * SPECIFIC_MATRIX_MAX_RATE_IDX; i++) {
+				ctx->station_err_matrix[oldnum * newnum + y][i] = DEFAULT_FULL_DYNAMIC_ERRPROB;
+			}
+		} else if (ctx->error_prob_matrix != NULL) {
+			ctx->error_prob_matrix[oldnum * newnum + y] = DEFAULT_DYNAMIC_ERRPROB;
+		} else {
+			ctx->snr_matrix[oldnum * newnum + y] = DEFAULT_DYNAMIC_SNR;
+		}
+	}
 
     if (ctx->station_err_matrix != NULL) {
         free(matrizes.old_station_err_matrix);
@@ -120,8 +120,14 @@ int add_station(struct wmediumd *ctx, const u8 addr[]) {
     station->index = (int) oldnum;
     memcpy(station->addr, addr, ETH_ALEN);
     memcpy(station->hwaddr, addr, ETH_ALEN);
+    station->isap = AP_DEFAULT;
+	station->gain = GAIN_DEFAULT;
+	station->tx_power = SNR_DEFAULT;
     station_init_queues(station);
+
     list_add_tail(&station->list, &ctx->stations);
+    realloc(ctx->sta_array, 1);
+    ctx->sta_array[station->index] = station;
     ctx->num_stas = (int) newnum;
     ret = station->index;
 

@@ -616,7 +616,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 	w_logf(ctx, LOG_NOTICE, "#_if = %d\n", count_ids);
 
 	/* Fill the mac_addr */
-	ctx->sta_array = malloc(sizeof(struct station *) * count_ids);
+	ctx->sta_array = malloc(sizeof(struct station *) * count_ids + 1);
 	if (!ctx->sta_array) {
 		w_flogf(ctx, LOG_ERR, stderr, "Out of memory(sta_array)!\n");
 		return -ENOMEM;
@@ -636,7 +636,6 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		memcpy(station->hwaddr, addr, ETH_ALEN);
 		station->tx_power = SNR_DEFAULT;
 		station->gain = GAIN_DEFAULT;
-		//station->height = HEIGHT_DEFAULT;
 		station->gRandom = GAUSS_RANDOM_DEFAULT;
 		station->isap = AP_DEFAULT;
 		station_init_queues(station);

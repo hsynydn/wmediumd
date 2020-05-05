@@ -28,9 +28,19 @@
 #define HWSIM_TX_CTL_NO_ACK		(1 << 1)
 #define HWSIM_TX_STAT_ACK		(1 << 2)
 
-#define HWSIM_CMD_REGISTER 1
-#define HWSIM_CMD_FRAME 2
-#define HWSIM_CMD_TX_INFO_FRAME 3
+enum {
+	HWSIM_CMD_UNSPEC,
+	HWSIM_CMD_REGISTER,
+	HWSIM_CMD_FRAME,
+	HWSIM_CMD_TX_INFO_FRAME,
+	HWSIM_CMD_NEW_RADIO,
+	HWSIM_CMD_DEL_RADIO,
+	HWSIM_CMD_GET_RADIO,
+	HWSIM_CMD_ADD_MAC_ADDR,
+	HWSIM_CMD_DEL_MAC_ADDR,
+	__HWSIM_CMD_MAX,
+};
+#define HWSIM_CMD_MAX (_HWSIM_CMD_MAX - 1)
 
 /**
  * enum hwsim_attrs - hwsim netlink attributes
@@ -109,6 +119,7 @@ enum {
 #include <stdbool.h>
 #include <syslog.h>
 #include <stdio.h>
+#include <usfstl/sched.h>
 
 #include "list.h"
 #include "ieee80211.h"
@@ -130,10 +141,16 @@ typedef uint64_t u64;
 #define NOISE_LEVEL	(-91)
 #define CCA_THRESHOLD	(-90)
 
+extern struct usfstl_scheduler scheduler;
+
 struct wqueue {
 	struct list_head frames;
 	int cw_min;
 	int cw_max;
+};
+
+struct addr {
+	u8 addr[ETH_ALEN];
 };
 
 struct station {
@@ -150,12 +167,41 @@ struct station {
 	double freq;			/* frequency [Mhz] */
 	struct wqueue queues[IEEE80211_NUM_ACS];
 	struct list_head list;
+	struct client *client;
+	unsigned int n_addrs;
+	struct addr *addrs;
+};
+
+enum client_type {
+	CLIENT_NETLINK,
+	CLIENT_VHOST_USER,
+	CLIENT_API_SOCK,
+};
+
+struct client {
+	struct list_head list;
+	enum client_type type;
+
+	/*
+	 * There's no additional data for the netlink client, we
+	 * just have it as such for the link from struct station.
+	 */
+
+	/* for vhost-user */
+	struct usfstl_vhost_user_dev *dev;
+
+	/* for API socket */
+	struct usfstl_loop_entry loop;
 };
 
 struct wmediumd {
 	int timerfd;
 
 	struct nl_sock *sock;
+	struct usfstl_loop_entry nl_loop;
+
+	struct list_head clients;
+	struct client nl_client;
 
 	int num_stas;
 	struct list_head stations;
@@ -164,6 +210,8 @@ struct wmediumd {
 	double *error_prob_matrix;
 	double **station_err_matrix;
 	struct intf_info *intf;
+	struct usfstl_job intf_job, move_job;
+
 	struct timespec intf_updated;
 #define MOVE_INTERVAL	(3) /* station movement interval [sec] */
 	struct timespec next_move;
@@ -196,6 +244,8 @@ struct hwsim_tx_rate {
 
 struct frame {
 	struct list_head list;		/* frame queue list */
+	struct usfstl_job job;
+	struct client *src;
 	struct timespec expires;	/* frame delivery (absolute) */
 	bool acked;
 	u64 cookie;

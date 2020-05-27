@@ -1,4 +1,5 @@
 *.o
+*.d
 wmediumd/wmediumd
 tests/client_snr
 tests/client_errprob

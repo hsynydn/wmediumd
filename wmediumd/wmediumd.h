@@ -1,6 +1,7 @@
 /*
  *	wmediumd, wireless medium simulator for mac80211_hwsim kernel module
  *	Copyright (c) 2011 cozybit Inc.
+ *  Copyright (C) 2020 Intel Corporation
  *
  *	Author:	Javier Lopez	<jlopex@cozybit.com>
  *		Javier Cardona	<javier@cozybit.com>
@@ -28,9 +29,20 @@
 #define HWSIM_TX_CTL_NO_ACK		(1 << 1)
 #define HWSIM_TX_STAT_ACK		(1 << 2)
 
-#define HWSIM_CMD_REGISTER 1
-#define HWSIM_CMD_FRAME 2
-#define HWSIM_CMD_TX_INFO_FRAME 3
+
+enum {
+	HWSIM_CMD_UNSPEC,
+	HWSIM_CMD_REGISTER,
+	HWSIM_CMD_FRAME,
+	HWSIM_CMD_TX_INFO_FRAME,
+	HWSIM_CMD_NEW_RADIO,
+	HWSIM_CMD_DEL_RADIO,
+	HWSIM_CMD_GET_RADIO,
+	HWSIM_CMD_ADD_MAC_ADDR,
+	HWSIM_CMD_DEL_MAC_ADDR,
+	__HWSIM_CMD_MAX,
+};
+#define HWSIM_CMD_MAX (_HWSIM_CMD_MAX - 1)
 
 /**
  * enum hwsim_attrs - hwsim netlink attributes
@@ -70,7 +82,6 @@
  * @__HWSIM_ATTR_MAX: enum limit
  */
 
-
 enum {
 	HWSIM_ATTR_UNSPEC,
 	HWSIM_ATTR_ADDR_RECEIVER,
@@ -95,6 +106,7 @@ enum {
 	HWSIM_ATTR_PAD,
 	__HWSIM_ATTR_MAX,
 };
+
 #define HWSIM_ATTR_MAX (__HWSIM_ATTR_MAX - 1)
 
 #define VERSION_NR 1
@@ -108,6 +120,7 @@ enum {
 #include <stdint.h>
 #include <stdbool.h>
 #include <syslog.h>
+#include <usfstl/sched.h>
 #include <stdio.h>
 
 #include "list.h"
@@ -130,10 +143,16 @@ typedef uint64_t u64;
 #define NOISE_LEVEL	(-91)
 #define CCA_THRESHOLD	(-90)
 
+extern struct usfstl_scheduler scheduler;
+
 struct wqueue {
 	struct list_head frames;
 	int cw_min;
 	int cw_max;
+};
+
+struct addr {
+	u8 addr[ETH_ALEN];
 };
 
 struct station {
@@ -149,13 +168,42 @@ struct station {
 	int isap; 		/* verify whether the node is ap */
 	double freq;			/* frequency [Mhz] */
 	struct wqueue queues[IEEE80211_NUM_ACS];
+	struct client *client;
+	unsigned int n_addrs;
+	struct addr *addrs;
 	struct list_head list;
+};
+
+enum client_type {
+	CLIENT_NETLINK,
+	CLIENT_VHOST_USER,
+	CLIENT_API_SOCK,
+};
+
+struct client {
+	struct list_head list;
+	enum client_type type;
+
+	/*
+	 * There's no additional data for the netlink client, we
+	 * just have it as such for the link from struct station.
+	 */
+
+	/* for vhost-user */
+	struct usfstl_vhost_user_dev *dev;
+
+	/* for API socket */
+	struct usfstl_loop_entry loop;
 };
 
 struct wmediumd {
 	int timerfd;
 
 	struct nl_sock *sock;
+	struct usfstl_loop_entry nl_loop;
+
+	struct list_head clients;
+	struct client nl_client;
 
 	int num_stas;
 	struct list_head stations;
@@ -164,9 +212,8 @@ struct wmediumd {
 	double *error_prob_matrix;
 	double **station_err_matrix;
 	struct intf_info *intf;
-	struct timespec intf_updated;
+	struct usfstl_job intf_job, move_job;
 #define MOVE_INTERVAL	(3) /* station movement interval [sec] */
-	struct timespec next_move;
 	void *path_loss_param;
 	float *per_matrix;
 	int per_matrix_row_num;
@@ -183,7 +230,6 @@ struct wmediumd {
 				 int, struct station *, struct station *);
 	int (*calc_path_loss)(void *, struct station *,
 			      struct station *);
-	void (*move_stations)(struct wmediumd *);
 	int (*get_fading_signal)(struct wmediumd *);
 
 	u8 log_lvl;
@@ -196,7 +242,9 @@ struct hwsim_tx_rate {
 
 struct frame {
 	struct list_head list;		/* frame queue list */
-	struct timespec expires;	/* frame delivery (absolute) */
+	struct client *client;
+	struct usfstl_job job;
+	struct client *src;
 	bool acked;
 	u64 cookie;
 	u32 freq;
@@ -243,7 +291,6 @@ struct intf_info {
 void station_init_queues(struct station *station);
 double get_error_prob_from_snr(double snr, unsigned int rate_idx, u32 freq,
 			       int frame_len);
-bool timespec_before(struct timespec *t1, struct timespec *t2);
 int set_default_per(struct wmediumd *ctx);
 int read_per_file(struct wmediumd *ctx, const char *file_name);
 int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);

@@ -167,7 +167,7 @@ static int calc_path_loss_log_distance(void *model_param,
  * This function returns path loss [dBm].
  */
 static int calc_path_loss_itu(void *model_param,
-			  struct station *dst, struct station *src)
+		struct station *dst, struct station *src)
 {
 	struct itu_model_param *param;
 	double PL, d;
@@ -296,18 +296,15 @@ static void recalc_path_loss(struct wmediumd *ctx)
 			signal = gains - path_loss - ctx->noise_threshold;
             ctx->snr_matrix[ctx->num_stas * start + end] = signal;
             ctx->snr_matrix[ctx->num_stas * end + start] = signal;
-	}
+		}
     }
 }
 
-static void move_stations_to_direction(struct wmediumd *ctx)
+static void move_stations_to_direction(struct usfstl_job *job)
 {
+    struct wmediumd *ctx = job->data;
 	struct station *station;
 	struct timespec now;
-
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	if (!timespec_before(&ctx->next_move, &now))
-		return;
 
 	list_for_each_entry(station, &ctx->stations, list) {
 		station->x += station->dir_x;
@@ -315,12 +312,8 @@ static void move_stations_to_direction(struct wmediumd *ctx)
 	}
 	recalc_path_loss(ctx);
 
-	clock_gettime(CLOCK_MONOTONIC, &ctx->next_move);
-	ctx->next_move.tv_sec += MOVE_INTERVAL;
-}
-
-static void move_stations_donothing(struct wmediumd *ctx)
-{
+	job->start += MOVE_INTERVAL * 1000000;
+	usfstl_sched_add_job(&scheduler, job);
 }
 
 static int parse_path_loss(struct wmediumd *ctx, config_t *cf)
@@ -351,7 +344,11 @@ static int parse_path_loss(struct wmediumd *ctx, config_t *cf)
 				"Specify %d directions\n", ctx->num_stas);
 			return -EINVAL;
 		}
-		ctx->move_stations = move_stations_to_direction;
+		ctx->move_job.start = MOVE_INTERVAL * 1000000;
+		ctx->move_job.name = "move";
+		ctx->move_job.data = ctx;
+		ctx->move_job.callback = move_stations_to_direction;
+		usfstl_sched_add_job(&scheduler, &ctx->move_job);
 	}
 
 	tx_powers = config_lookup(cf, "model.tx_powers");
@@ -581,7 +578,6 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		ctx->intf = NULL;
 		ctx->get_fading_signal = get_no_fading_signal;
 		ctx->fading_coefficient = 0;
-		ctx->move_stations = move_stations_donothing;
 		ctx->snr_matrix = malloc(0);
 		ctx->per_matrix = NULL;
 		ctx->per_matrix_row_num = 0;
@@ -616,7 +612,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 	w_logf(ctx, LOG_NOTICE, "#_if = %d\n", count_ids);
 
 	/* Fill the mac_addr */
-	ctx->sta_array = malloc(sizeof(struct station *) * count_ids);
+	ctx->sta_array = calloc(count_ids, sizeof(struct station *));
 	if (!ctx->sta_array) {
 		w_flogf(ctx, LOG_ERR, stderr, "Out of memory(sta_array)!\n");
 		return -ENOMEM;
@@ -626,7 +622,7 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		const char *str =  config_setting_get_string_elem(ids, i);
 		string_to_mac_address(str, addr);
 
-		station = malloc(sizeof(*station));
+		station = calloc(1, sizeof(*station));
 		if (!station) {
 			w_flogf(ctx, LOG_ERR, stderr, "Out of memory!\n");
 			return -ENOMEM;
@@ -674,7 +670,6 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		ctx->noise_threshold = NOISE_LEVEL;
 	}
 
-
 	fading_coefficient =
 		config_lookup(cf, "model.fading_coefficient");
 	if (fading_coefficient &&
@@ -686,8 +681,6 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 		ctx->get_fading_signal = get_no_fading_signal;
 		ctx->fading_coefficient = 0;
 	}
-
-	ctx->move_stations = move_stations_donothing;
 
 	/* create link quality matrix */
 	ctx->snr_matrix = calloc(sizeof(int), count_ids * count_ids);

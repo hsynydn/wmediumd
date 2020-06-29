@@ -26,6 +26,7 @@
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/family.h>
+#include <assert.h>
 #include <stdint.h>
 #include <getopt.h>
 #include <signal.h>
@@ -182,26 +183,6 @@ static double milliwatt_to_dBm(double value)
 	return 10.0 * log10(value);
 }
 
-static int set_interference_duration(struct wmediumd *ctx, int src_idx,
-									 int duration, int signal)
-{
-	int i;
-
-	if (!ctx->intf)
-		return 0;
-
-	if (signal >= CCA_THRESHOLD)
-		return 0;
-
-	for (i = 0; i < ctx->num_stas; i++) {
-		ctx->intf[ctx->num_stas * src_idx + i].duration += duration;
-		// use only latest value
-		ctx->intf[ctx->num_stas * src_idx + i].signal = signal;
-	}
-
-	return 1;
-}
-
 static int get_signal_offset_by_interference(struct wmediumd *ctx, int src_idx,
 					     int dst_idx)
 {
@@ -242,6 +223,15 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 	return NULL;
 }
 
+static void wmediumd_wait_for_client_ack(struct wmediumd *ctx,
+					 struct client *client)
+{
+	client->wait_for_ack = true;
+
+	while (client->wait_for_ack)
+		usfstl_loop_wait_and_handle();
+}
+
 static bool station_has_addr(struct station *station, const u8 *addr)
 {
 	unsigned int i;
@@ -266,6 +256,41 @@ static struct station *get_station_by_used_addr(struct wmediumd *ctx, u8 *addr)
 			return station;
 	}
 	return NULL;
+}
+
+static void wmediumd_notify_frame_start(struct usfstl_job *job)
+{
+	struct frame *frame = container_of(job, struct frame, start_job);
+	struct wmediumd *ctx = job->data;
+	struct client *client;
+	struct {
+		struct wmediumd_message_header hdr;
+		struct wmediumd_tx_start start;
+	} __attribute__((packed)) msg = {
+		.hdr.type = WMEDIUMD_MSG_TX_START,
+		.hdr.data_len = sizeof(msg.start),
+		.start.freq = frame->freq,
+	};
+
+	if (ctx->ctrl)
+		usfstl_sched_ctrl_sync_to(ctx->ctrl);
+
+	list_for_each_entry(client, &ctx->clients, list) {
+		if (!(client->flags & WMEDIUMD_CTL_NOTIFY_TX_START))
+			continue;
+
+		if (client == frame->src)
+			msg.start.cookie = frame->cookie;
+		else
+			msg.start.cookie = 0;
+
+		/* must be API socket since flags cannot otherwise be set */
+		assert(client->type == CLIENT_API_SOCK);
+
+		write(client->loop.fd, &msg, sizeof(msg));
+
+		wmediumd_wait_for_client_ack(ctx, client);
+	}
 }
 
 static void queue_frame(struct wmediumd *ctx, struct station *station,
@@ -398,6 +423,15 @@ static void queue_frame(struct wmediumd *ctx, struct station *station,
 
 	frame->duration = send_time;
 	frame->src = station->client;
+
+	if (ctx->need_start_notify) {
+		frame->start_job.start = target - send_time;
+		frame->start_job.callback = wmediumd_notify_frame_start;
+		frame->start_job.data = ctx;
+		frame->start_job.name = "frame-start";
+		usfstl_sched_add_job(&scheduler, &frame->start_job);
+	}
+
 	frame->job.start = target;
 	frame->job.callback = wmediumd_deliver_frame;
 	frame->job.data = ctx;
@@ -434,6 +468,10 @@ static void wmediumd_remove_client(struct wmediumd *ctx, struct client *client)
 
 	if (!list_empty(&client->list))
 		list_del(&client->list);
+
+	if (client->flags & WMEDIUMD_CTL_NOTIFY_TX_START)
+		ctx->need_start_notify--;
+
 	free(client);
 }
 
@@ -462,8 +500,7 @@ static void wmediumd_send_to_client(struct wmediumd *ctx,
 		hdr.data_len = len;
 		write(client->loop.fd, &hdr, sizeof(hdr));
 		write(client->loop.fd, (void *)nlmsg_hdr(msg), len);
-		/* read the ACK back */
-		read(client->loop.fd, &hdr, sizeof(hdr));
+		wmediumd_wait_for_client_ack(ctx, client);
 		break;
 	}
 }
@@ -500,6 +537,8 @@ static void send_tx_info_frame_nl(struct wmediumd *ctx, struct frame *frame)
 			goto out;
 	}
 
+	if (ctx->ctrl)
+			usfstl_sched_ctrl_sync_to(ctx->ctrl);
 	wmediumd_send_to_client(ctx, frame->src, msg);
 
 out:
@@ -509,11 +548,14 @@ out:
 /*
  * Send a data frame to the kernel for reception at a specific radio.
  */
-static void send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
-	          u8 *data, int data_len, int rate_idx,
-			  int signal, int freq)
+static void send_cloned_frame_msg(struct wmediumd *ctx, struct client *src,
+		struct station *dst, u8 *data, int data_len,
+		int rate_idx, int signal, int freq,
+		uint64_t cookie)
 {
-	struct nl_msg *msg;
+	struct client *client;
+	struct nl_msg *msg, *cmsg = NULL;
+
 	struct nl_sock *sock = ctx->sock;
 
 	msg = nlmsg_alloc();
@@ -542,17 +584,29 @@ static void send_cloned_frame_msg(struct wmediumd *ctx, struct station *dst,
 	w_logf(ctx, LOG_DEBUG, "cloned msg dest " MAC_FMT " (radio: " MAC_FMT ") len %d\n",
 		   MAC_ARGS(dst->addr), MAC_ARGS(dst->hwaddr), data_len);
 
-	if (dst->client) {
-		wmediumd_send_to_client(ctx, dst->client, msg);
-	} else {
-		struct client *client;
+	if (ctx->ctrl)
+			usfstl_sched_ctrl_sync_to(ctx->ctrl);
 
-		list_for_each_entry(client, &ctx->clients, list)
-		wmediumd_send_to_client(ctx, client, msg);
+	list_for_each_entry(client, &ctx->clients, list) {
+		if (client->flags & WMEDIUMD_CTL_RX_ALL_FRAMES) {
+			if (src == client && !cmsg) {
+				struct nlmsghdr *nlh = nlmsg_hdr(msg);
+
+				cmsg = nlmsg_inherit(nlh);
+				nlmsg_append(cmsg, nlmsg_data(nlh), nlmsg_datalen(nlh), 0);
+				assert(nla_put_u64(cmsg, HWSIM_ATTR_COOKIE, cookie) == 0);
+			}
+			wmediumd_send_to_client(ctx, client,
+								src == client ? cmsg : msg);
+		} else if (!dst->client || dst->client == client) {
+			wmediumd_send_to_client(ctx, client, msg);
+		}
 	}
 
 out:
 	nlmsg_free(msg);
+	if (cmsg)
+		nlmsg_free(cmsg);
 }
 
 static void wmediumd_deliver_frame(struct usfstl_job *job)
@@ -560,81 +614,93 @@ static void wmediumd_deliver_frame(struct usfstl_job *job)
     struct wmediumd *ctx = job->data;
 	struct frame *frame = container_of(job, struct frame, job);
 	struct ieee80211_hdr *hdr = (void *) frame->data;
-	struct station *station;
+	struct station *receiver;
 	u8 *dest = hdr->addr1;
 	u8 *src = frame->sender->addr;
 
 	list_del(&frame->list);
-	if (frame->flags & HWSIM_TX_STAT_ACK) {
-		/* rx the frame on the dest interface */
-		list_for_each_entry(station, &ctx->stations, list) {
-			if (memcmp(src, station->addr, ETH_ALEN) == 0)
+
+	/* rx the frame on the dest interface */
+	list_for_each_entry(receiver, &ctx->stations, list) {
+		int snr = 0, signal;
+
+		if (memcmp(src, receiver->addr, ETH_ALEN) == 0)
+			continue;
+
+		if (memcmp(dest, receiver->addr, ETH_ALEN) == 0) {
+			signal = frame->signal;
+		} else {
+			snr = ctx->get_link_snr(ctx, frame->sender, receiver);
+			snr -= get_signal_offset_by_interference(ctx,
+				frame->sender->index, receiver->index);
+			snr += ctx->get_fading_signal(ctx);
+			signal = snr + NOISE_LEVEL;
+		}
+
+		if (signal < CCA_THRESHOLD) {
+			if (!ctx->intf)
 				continue;
 
-			int rate_idx;
-			if (is_multicast_ether_addr(dest)) {
-				int snr, signal;
-				double error_prob;
-				/*
-				 * we may or may not receive this based on
-				 * reverse link from sender -- check for
-				 * each receiver.
-				 */
-				snr = ctx->get_link_snr(ctx, frame->sender,
-							station);
-				snr += ctx->get_fading_signal(ctx);
-				signal = snr + NOISE_LEVEL;
-				if (signal < CCA_THRESHOLD)
-					continue;
+			int __index = ctx->num_stas * frame->sender->index +
+				receiver->index;
 
-				if (set_interference_duration(ctx,
-					frame->sender->index, frame->duration,
-					signal))
-					continue;
-
-				snr -= get_signal_offset_by_interference(ctx,
-					frame->sender->index, station->index);
-				rate_idx = frame->tx_rates[0].idx;
-				error_prob = ctx->get_error_prob(ctx,
-					(double)snr, rate_idx, frame->freq,
-					frame->data_len, frame->sender,
-					station);
-
-				if (drand48() <= error_prob) {
-					w_logf(ctx, LOG_INFO, "Dropped mcast from "
-						   MAC_FMT " to " MAC_FMT " at receiver\n",
-						   MAC_ARGS(src), MAC_ARGS(station->addr));
-					continue;
-				}
-
-				send_cloned_frame_msg(ctx, station,
-						      frame->data,
-						      frame->data_len,
-						      rate_idx, signal,
-						      frame->freq);
-			} else if (station_has_addr(station, dest)) {
-				if (set_interference_duration(ctx,
-					frame->sender->index, frame->duration,
-					frame->signal))
-					continue;
-				rate_idx = frame->tx_rates[0].idx;
-				send_cloned_frame_msg(ctx, station,
-						      frame->data,
-						      frame->data_len,
-						      rate_idx, frame->signal,
-						      frame->freq);
-  			}
+			/*
+			 * The interference model assumes signals which strength
+			 * is under CCA threshold are interference signal.
+			 * The model accumulates the durations of such signals.
+			 * The model assumes (accumulated duration / time slot)
+			 * is probability of occurence of interference.
+			 * When interference occurs, the model reduces the
+			 * signal strength from Tx signal strength.
+			 */
+			ctx->intf[__index].duration += frame->duration;
+			// use only max value
+			if (ctx->intf[__index].signal < signal)
+				ctx->intf[__index].signal = signal;
+			continue;
 		}
-	} else
-		set_interference_duration(ctx, frame->sender->index,
-					  frame->duration, frame->signal);
+
+		if (!(frame->flags & HWSIM_TX_STAT_ACK))
+			continue;
+
+		if (is_multicast_ether_addr(dest)) {
+			int rate_idx;
+			double error_prob;
+
+			/*
+			 * we may or may not receive this based on
+			 * reverse link from sender -- check for
+			 * each receiver.
+			 */
+			rate_idx = frame->tx_rates[0].idx;
+			error_prob = ctx->get_error_prob(ctx, (double)snr,
+				rate_idx, frame->freq, frame->data_len,
+				frame->sender, receiver);
+
+			if (drand48() <= error_prob) {
+				w_logf(ctx, LOG_INFO, "Dropped mcast from "
+					   MAC_FMT " to " MAC_FMT " at receiver\n",
+					   MAC_ARGS(src), MAC_ARGS(receiver->addr));
+				continue;
+			}
+		} else if (memcmp(dest, receiver->addr, ETH_ALEN) != 0)
+			continue;
+
+		send_cloned_frame_msg(ctx, frame->sender->client,
+								receiver,
+								frame->data,
+								frame->data_len,
+								1, frame->signal,
+								frame->freq,
+								frame->cookie);
+	}
 
 	send_tx_info_frame_nl(ctx, frame);
 
 	free(frame);
 }
 
-static void wmediumd_intf_update(struct usfstl_job *job)
+void wmediumd_intf_update(struct usfstl_job *job)
 {
 	struct wmediumd *ctx = job->data;
 	int i, j;
@@ -648,6 +714,7 @@ static void wmediumd_intf_update(struct usfstl_job *job)
 				ctx->intf[i * ctx->num_stas + j].duration /
 				(double)10000;
 			ctx->intf[i * ctx->num_stas + j].duration = 0;
+			ctx->intf[i * ctx->num_stas + j].signal = -200;
 		}
 
 	job->start += 10000;
@@ -854,6 +921,7 @@ static void wmediumd_api_handler(struct usfstl_loop_entry *entry)
 	struct wmediumd *ctx = entry->data;
 	struct wmediumd_message_header hdr;
 	enum wmediumd_message response = WMEDIUMD_MSG_ACK;
+	struct wmediumd_message_control control = {};
 	struct nl_msg *nlmsg;
 	unsigned char *data;
 	ssize_t len;
@@ -874,6 +942,14 @@ static void wmediumd_api_handler(struct usfstl_loop_entry *entry)
 	if (len != hdr.data_len)
 		goto disconnect;
 
+	if (client->wait_for_ack) {
+			assert(hdr.type == WMEDIUMD_MSG_ACK);
+			assert(hdr.data_len == 0);
+			client->wait_for_ack = false;
+			/* don't send a response to a response, of course */
+			return;
+		}
+
 	switch (hdr.type) {
 	case WMEDIUMD_MSG_REGISTER:
 		if (!list_empty(&client->list)) {
@@ -890,6 +966,9 @@ static void wmediumd_api_handler(struct usfstl_loop_entry *entry)
 		list_del_init(&client->list);
 		break;
 	case WMEDIUMD_MSG_NETLINK:
+		if (ctx->ctrl)
+					usfstl_sched_ctrl_sync_from(ctx->ctrl);
+
 		if (!nlmsg_ok((const struct nlmsghdr *)data, len)) {
 			response = WMEDIUMD_MSG_INVALID;
 			break;
@@ -903,6 +982,20 @@ static void wmediumd_api_handler(struct usfstl_loop_entry *entry)
 
 		nlmsg_free(nlmsg);
 		break;
+	case WMEDIUMD_MSG_SET_CONTROL:
+		/* copy what we get and understand, leave the rest zeroed */
+		memcpy(&control, data,
+			   min(sizeof(control), hdr.data_len));
+
+		if (client->flags & WMEDIUMD_CTL_NOTIFY_TX_START)
+			ctx->need_start_notify--;
+		if (control.flags & WMEDIUMD_CTL_NOTIFY_TX_START)
+			ctx->need_start_notify++;
+
+		client->flags = control.flags;
+		break;
+	case WMEDIUMD_MSG_ACK:
+			abort();
 	default:
 		response = WMEDIUMD_MSG_INVALID;
 		break;
@@ -1178,17 +1271,6 @@ int main(int argc, char *argv[])
 		usfstl_sched_add_job(&scheduler, &ctx.intf_job);
 	}
 
-	if (time_socket) {
-		usfstl_sched_ctrl_start(&ctrl, time_socket,
-					1000 /* nsec per usec */,
-					(uint64_t)-1 /* no ID */,
-					&scheduler);
-        vusrv.scheduler = &scheduler;
-        vusrv.ctrl = &ctrl;
-    } else {
-		usfstl_sched_wallclock_init(&scheduler, 1000);
-    }
-
     if (vusrv.socket)
 		usfstl_vhost_user_server_start(&vusrv);
 
@@ -1210,14 +1292,25 @@ int main(int argc, char *argv[])
     	start_wserver(&ctx);
 		usfstl_uds_create(api_socket, wmediumd_api_connected, &ctx);
 	}
+    if (time_socket) {
+		usfstl_sched_ctrl_start(&ctrl, time_socket,
+					  1000 /* nsec per usec */,
+					  (uint64_t)-1 /* no ID */,
+					  &scheduler);
+		vusrv.scheduler = &scheduler;
+		vusrv.ctrl = &ctrl;
+		ctx.ctrl = &ctrl;
+	} else {
+		usfstl_sched_wallclock_init(&scheduler, 1000);
+	}
 	while (1) {
-	        if (time_socket) {
-	                usfstl_sched_next(&scheduler);
-	        } else {
-			usfstl_sched_wallclock_wait_and_handle(&scheduler);
-
-			if (usfstl_sched_next_pending(&scheduler, NULL))
+		if (time_socket) {
 				usfstl_sched_next(&scheduler);
+		} else {
+		usfstl_sched_wallclock_wait_and_handle(&scheduler);
+
+		if (usfstl_sched_next_pending(&scheduler, NULL))
+			usfstl_sched_next(&scheduler);
 		}
 	}
 

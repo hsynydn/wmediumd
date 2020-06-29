@@ -194,6 +194,9 @@ struct client {
 
 	/* for API socket */
 	struct usfstl_loop_entry loop;
+	bool wait_for_ack;
+
+	u32 flags;
 };
 
 struct wmediumd {
@@ -201,6 +204,8 @@ struct wmediumd {
 
 	struct nl_sock *sock;
 	struct usfstl_loop_entry nl_loop;
+
+	struct usfstl_sched_ctrl *ctrl;
 
 	struct list_head clients;
 	struct client nl_client;
@@ -233,6 +238,8 @@ struct wmediumd {
 	int (*get_fading_signal)(struct wmediumd *);
 
 	u8 log_lvl;
+
+	u32 need_start_notify;
 };
 
 struct hwsim_tx_rate {
@@ -244,6 +251,7 @@ struct frame {
 	struct list_head list;		/* frame queue list */
 	struct client *client;
 	struct usfstl_job job;
+	struct usfstl_job start_job;
 	struct client *src;
 	bool acked;
 	u64 cookie;

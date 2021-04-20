@@ -87,7 +87,6 @@ static void calc_signal(struct request_ctx *ctx)
 				txpower = ctx->ctx->sta_array[to]->tx_power;
 			path_loss = ctx->ctx->calc_path_loss(ctx->ctx->path_loss_param,
 					ctx->ctx->sta_array[to], ctx->ctx->sta_array[from]);
-			txpower = ctx->ctx->sta_array[from]->tx_power;
 			gains = (txpower + ctx->ctx->sta_array[from]->gain + ctx->ctx->sta_array[to]->gain);
 			signal = gains - path_loss - ctx->ctx->noise_threshold;
 			mirror_link_(ctx, from, to, signal);

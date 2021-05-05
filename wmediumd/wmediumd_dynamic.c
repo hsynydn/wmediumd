@@ -125,7 +125,7 @@ int add_station(struct wmediumd *ctx, const u8 addr[]) {
     station->tx_power = SNR_DEFAULT;
     station_init_queues(station);
     list_add_tail(&station->list, &ctx->stations);
-    realloc(ctx->sta_array, 1);
+    //realloc(ctx->sta_array, 1);
     ctx->sta_array[station->index] = station;
     ctx->num_stas = (int) newnum;
     ret = station->index;

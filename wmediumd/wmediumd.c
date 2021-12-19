@@ -423,6 +423,9 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
                 if (tail && timespec_before(&target, &tail->expires))
                     target = tail->expires;
             }
+        } else {
+            w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is not #%d, it is #%d\n", MAC_ARGS(tmpsta->addr),
+                   station->medium_id, tmpsta->medium_id);
         }
     }
 

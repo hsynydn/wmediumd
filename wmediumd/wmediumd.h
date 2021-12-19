@@ -150,6 +150,7 @@ struct station {
 	double freq;			/* frequency [Mhz] */
 	struct wqueue queues[IEEE80211_NUM_ACS];
 	struct list_head list;
+    int medium_id;
 };
 
 struct wmediumd {

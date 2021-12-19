@@ -576,7 +576,8 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 	const config_setting_t *error_probs = NULL, *error_prob;
 	const config_setting_t *enable_interference;
 	const config_setting_t *fading_coefficient, *noise_threshold, *default_prob;
-	int count_ids, i, j;
+	const config_setting_t *mediums, *medium_data,*interface_data;
+	int count_ids, count_mediums, count_interfaces, station_id, i, j;
 	int start, end, snr;
 	struct station *station;
 	const char *model_type_str;
@@ -725,6 +726,19 @@ int load_config(struct wmediumd *ctx, const char *file, const char *per_file, bo
 			}
 		}
 	}
+    mediums = config_lookup(cf, "ifaces.medium_array");
+    if (mediums) {
+        count_mediums = config_setting_length(mediums);
+        for (i = 0; i < count_mediums; i++) {
+            medium_data = config_setting_get_elem(mediums, i);
+            count_interfaces = config_setting_length(medium_data);
+            for (j = 0; j < count_interfaces; j++) {
+                interface_data = config_setting_get_elem(medium_data, j);
+                station_id = config_setting_get_int(interface_data);
+                ctx->sta_array[station_id]->medium_id = i+1;
+            }
+        }
+    }
 
 	if (per_file && error_probs) {
 		w_flogf(ctx, LOG_ERR, stderr,

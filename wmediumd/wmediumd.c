@@ -412,14 +412,19 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	 * (or now, if none).
 	 */
 	target = now;
-	for (i = 0; i <= ac; i++) {
-		list_for_each_entry(tmpsta, &ctx->stations, list) {
-			tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
-						       struct frame, list);
-			if (tail && timespec_before(&target, &tail->expires))
-				target = tail->expires;
-		}
-	}
+    w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is #%d\n", MAC_ARGS(station->addr), station->medium_id);
+    list_for_each_entry(tmpsta, &ctx->stations, list) {
+        if (station->medium_id == tmpsta->medium_id) {
+            w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is also #%d\n", MAC_ARGS(tmpsta->addr),
+                   tmpsta->medium_id);
+            for (i = 0; i <= ac; i++) {
+                tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
+                                               struct frame, list);
+                if (tail && timespec_before(&target, &tail->expires))
+                    target = tail->expires;
+            }
+        }
+    }
 
 	timespec_add_usec(&target, send_time);
 

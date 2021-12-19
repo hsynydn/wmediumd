@@ -185,6 +185,16 @@ void hton_station_add_response(station_add_response *elem) {
     htoni_wrapper(&elem->created_id);
 }
 
+void hton_medium_update_request(medium_update_request *elem) {
+    hton_base(&elem->base);
+    htoni_wrapper((int32_t*)&elem->medium_id_);
+}
+
+void hton_medium_update_response(medium_update_response *elem) {
+    hton_base(&elem->base);
+    hton_medium_update_request(&elem->request);
+}
+
 void ntoh_base(wserver_msg *elem) {
     UNUSED(elem);
 }
@@ -289,4 +299,14 @@ void ntoh_station_add_response(station_add_response *elem) {
     ntoh_base(&elem->base);
     ntoh_station_add_request(&elem->request);
     ntohi_wrapper(&elem->created_id);
+}
+
+void ntoh_medium_update_request(medium_update_request *elem) {
+    ntoh_base(&elem->base);
+    ntohi_wrapper((int32_t*)&elem->medium_id_);
+}
+
+void ntoh_medium_update_response(medium_update_response *elem) {
+    ntoh_base(&elem->base);
+    ntoh_medium_update_request(&elem->request);
 }

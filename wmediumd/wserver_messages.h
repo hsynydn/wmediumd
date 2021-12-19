@@ -62,9 +62,13 @@
 #define WSERVER_HEIGHT_UPDATE_RESPONSE_TYPE 20
 #define WSERVER_GAUSSIAN_RANDOM_UPDATE_REQUEST_TYPE 21
 #define WSERVER_GAUSSIAN_RANDOM_UPDATE_RESPONSE_TYPE 22
+#define WSERVER_MEDIUM_UPDATE_REQUEST_TYPE 23
+#define WSERVER_MEDIUM_UPDATE_RESPONSE_TYPE 24
 
 #define SPECIFIC_MATRIX_MAX_SIZE_IDX (12)
 #define SPECIFIC_MATRIX_MAX_RATE_IDX (12)
+
+#define MULTIMEDIUM_MAX_STATION_NUMBER 250
 
 #ifndef __packed
 #define __packed __attribute__((packed))
@@ -222,6 +226,18 @@ typedef struct __packed {
     u8 update_result;
 } station_add_response;
 
+typedef struct __packed {
+    wserver_msg base;
+    u8 sta_addr[ETH_ALEN];
+    i32 medium_id_;
+} medium_update_request;
+
+typedef struct __packed {
+    wserver_msg base;
+    medium_update_request request;
+    u8 update_result;
+} medium_update_response;
+
 /**
  * Receive the wserver_msg from a socket
  * @param sock_fd The socket file descriptor
@@ -302,6 +318,10 @@ int send_station_add_request(int sock, const station_add_request *elem);
 
 int send_station_add_response(int sock, const station_add_response *elem);
 
+int send_medium_update_request(int sock, const medium_update_request *elem);
+
+int send_medium_update_response(int sock, const medium_update_response *elem);
+
 int recv_snr_update_request(int sock, snr_update_request *elem);
 
 int recv_snr_update_response(int sock, snr_update_response *elem);
@@ -345,6 +365,10 @@ int recv_station_del_by_id_response(int sock, station_del_by_id_response *elem);
 int recv_station_add_request(int sock, station_add_request *elem);
 
 int recv_station_add_response(int sock, station_add_response *elem);
+
+int recv_medium_update_request(int sock, medium_update_request *elem);
+
+int recv_medium_update_response(int sock, medium_update_response *elem);
 
 double custom_fixed_point_to_floating_point(u32 fixed_point);
 

@@ -235,7 +235,7 @@ static double milliwatt_to_dBm(double value)
 static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 				     int duration, int signal)
 {
-	int i;
+	int i, medium_id;
 
 	if (!ctx->intf)
 		return 0;
@@ -243,7 +243,10 @@ static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 	if (signal >= CCA_THRESHOLD)
 		return 0;
 
+    medium_id = ctx->sta_array[src_idx]->medium_id;
 	for (i = 0; i < ctx->num_stas; i++) {
+        if (medium_id != ctx->sta_array[i]->medium_id)
+            continue;
 		ctx->intf[ctx->num_stas * src_idx + i].duration += duration;
 		// use only latest value
 		ctx->intf[ctx->num_stas * src_idx + i].signal = signal;
@@ -255,16 +258,19 @@ static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 static int get_signal_offset_by_interference(struct wmediumd *ctx, int src_idx,
 					     int dst_idx)
 {
-	int i;
+    int i, medium_id;
 	double intf_power;
 
 	if (!ctx->intf)
 		return 0;
 
 	intf_power = 0.0;
+    medium_id = ctx->sta_array[dst_idx]->medium_id;
 	for (i = 0; i < ctx->num_stas; i++) {
 		if (i == src_idx || i == dst_idx)
 			continue;
+        if (medium_id != ctx->sta_array[i]->medium_id)
+            continue;
 		if (drand48() < ctx->intf[i * ctx->num_stas + dst_idx].prob_col)
 			intf_power += dBm_to_milliwatt(
 				ctx->intf[i * ctx->num_stas + dst_idx].signal);
@@ -635,7 +641,8 @@ void deliver_expired_frames(struct wmediumd *ctx)
 	struct timespec now, _diff;
 	struct station *station;
 	struct list_head *l;
-	int i, j, duration;
+    int i, j, duration;
+    int sta1_medium_id;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	list_for_each_entry(station, &ctx->stations, list) {
@@ -665,16 +672,20 @@ void deliver_expired_frames(struct wmediumd *ctx)
 		return;
 
 	// update interference
-	for (i = 0; i < ctx->num_stas; i++)
-		for (j = 0; j < ctx->num_stas; j++) {
-			if (i == j)
-				continue;
-			// probability is used for next calc
-			ctx->intf[i * ctx->num_stas + j].prob_col =
-				ctx->intf[i * ctx->num_stas + j].duration /
-				(double)duration;
-			ctx->intf[i * ctx->num_stas + j].duration = 0;
-		}
+	for (i = 0; i < ctx->num_stas; i++){
+        sta1_medium_id = ctx->sta_array[i]->medium_id;
+        for (j = 0; j < ctx->num_stas; j++) {
+            if (i == j)
+                continue;
+            if (sta1_medium_id != ctx->sta_array[j]->medium_id)
+                continue;
+            // probability is used for next calc
+            ctx->intf[i * ctx->num_stas + j].prob_col =
+                    ctx->intf[i * ctx->num_stas + j].duration /
+                    (double)duration;
+            ctx->intf[i * ctx->num_stas + j].duration = 0;
+        }
+    }
 
 	clock_gettime(CLOCK_MONOTONIC, &ctx->intf_updated);
 }

@@ -130,6 +130,7 @@ typedef uint64_t u64;
 
 #define NOISE_LEVEL	(-91)
 #define CCA_THRESHOLD	(-90)
+#define ENABLE_MEDIUM_DETECTION	true
 
 struct wqueue {
 	struct list_head frames;
@@ -158,7 +159,7 @@ struct wmediumd {
 	int timerfd;
 
 	struct nl_sock *sock;
-
+    bool enable_medium_detection;
 	int num_stas;
 	struct list_head stations;
 	struct station **sta_array;
@@ -251,5 +252,6 @@ int read_per_file(struct wmediumd *ctx, const char *file_name);
 int w_logf(struct wmediumd *ctx, u8 level, const char *format, ...);
 int w_flogf(struct wmediumd *ctx, u8 level, FILE *stream, const char *format, ...);
 int index_to_rate(size_t index, u32 freq);
+void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest);
 
 #endif /* WMEDIUMD_H_ */

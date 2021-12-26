@@ -298,6 +298,36 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 	return NULL;
 }
 
+void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest) {
+    int medium_id;
+    if (!ctx->enable_medium_detection){
+        return;
+    }
+    if(src->isap& !dest->isap){
+        // AP-STA Connection
+        medium_id = -src->index-1;
+    }else if((!src->isap)& dest->isap){
+        // STA-AP Connection
+        medium_id = -dest->index-1;
+    }else{
+        // AP-AP Connection
+        // STA-STA Connection
+        // TODO: Detect adhoc and mesh groups
+        return;
+    }
+    if (medium_id!=src->medium_id){
+        w_logf(ctx, LOG_DEBUG, "Setting medium id of " MAC_FMT "(%d|%s) to %d.\n",
+               MAC_ARGS(src->addr), src->index, src->isap ? "AP" : "Sta",
+               medium_id);
+        src-> medium_id = medium_id;
+    }
+    if(medium_id!=dest->medium_id){
+        w_logf(ctx, LOG_DEBUG, "Setting medium id of " MAC_FMT "(%d|%s) to %d.\n",
+               MAC_ARGS(dest->addr), dest->index, dest->isap ? "AP" : "Sta",
+               medium_id);
+        dest-> medium_id = medium_id;
+    }
+}
 void queue_frame(struct wmediumd *ctx, struct station *station,
 		 struct frame *frame)
 {
@@ -349,6 +379,10 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	} else {
 		deststa = get_station_by_addr(ctx, dest);
 		if (deststa) {
+            w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
+                   MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
+                   MAC_ARGS(deststa->hwaddr), deststa->index, deststa->isap ? "AP" : "Sta");
+            detect_mediums(ctx,station,deststa);
 			snr = ctx->get_link_snr(ctx, station, deststa) -
 				get_signal_offset_by_interference(ctx,
 					station->index, deststa->index);

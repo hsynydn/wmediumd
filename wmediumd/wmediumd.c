@@ -730,7 +730,7 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
 	struct genlmsghdr *gnlh = nlmsg_data(&nlerr->msg);
 	struct wmediumd *ctx = arg;
 
-	w_flogf(ctx, LOG_ERR, stderr, "nl: cmd %d, seq %d: %s\n", gnlh->cmd,
+	w_flogf(ctx, LOG_DEBUG, stderr, "nl: cmd %d, seq %d: %s\n", gnlh->cmd,
 			nlerr->msg.nlmsg_seq, strerror(abs(nlerr->error)));
 
 	return NL_SKIP;

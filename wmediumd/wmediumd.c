@@ -381,7 +381,7 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 		if (deststa) {
             w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
                    MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
-                   MAC_ARGS(deststa->hwaddr), deststa->index, deststa->isap ? "AP" : "Sta");
+                   MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
             detect_mediums(ctx,station,deststa);
 			snr = ctx->get_link_snr(ctx, station, deststa) -
 				get_signal_offset_by_interference(ctx,
@@ -622,11 +622,13 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 
 				if (drand48() <= error_prob) {
 					w_logf(ctx, LOG_INFO, "Dropped mcast from "
-						   MAC_FMT " to " MAC_FMT " at receiver\n",
-						   MAC_ARGS(src), MAC_ARGS(station->addr));
+						   MAC_FMT " to " MAC_FMT " at receiver, signal: %d, error_prob: %.2f \n",
+						   MAC_ARGS(src), MAC_ARGS(station->addr),signal,error_prob);
 					continue;
 				}
-
+//                w_logf(ctx, LOG_INFO, "Sending mcast from "
+//                                      MAC_FMT " to " MAC_FMT " at receiver, signal: %d, error_prob: %.2f \n",
+//                       MAC_ARGS(src), MAC_ARGS(station->addr),signal,error_prob);
 				send_cloned_frame_msg(ctx, station,
 						      frame->data,
 						      frame->data_len,
@@ -638,6 +640,9 @@ void deliver_frame(struct wmediumd *ctx, struct frame *frame)
 					frame->signal))
 					continue;
 				rate_idx = frame->tx_rates[0].idx;
+//                w_logf(ctx, LOG_INFO, "Sent packet from "
+//                                      MAC_FMT " to " MAC_FMT " , signal: %d, duration: %.2f, rate: %d \n",
+//                       MAC_ARGS(src), MAC_ARGS(station->addr),frame->signal, frame->duration,rate_idx);
 				send_cloned_frame_msg(ctx, station,
 						      frame->data,
 						      frame->data_len,
@@ -1025,7 +1030,7 @@ int main(int argc, char *argv[])
 			printf("%s: config file must be supplied\n", argv[0]);
 			print_help(EXIT_FAILURE);
 		}
-
+        printf("Input configuration file: %s\n", config_file);
 		w_logf(&ctx, LOG_NOTICE, "Input configuration file: %s\n", config_file);
 	}
 	INIT_LIST_HEAD(&ctx.stations);

@@ -381,7 +381,7 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 		if (deststa) {
             w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
                    MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
-                   MAC_ARGS(deststa->hwaddr), deststa->index, deststa->isap ? "AP" : "Sta");
+                   MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
             detect_mediums(ctx,station,deststa);
 			snr = ctx->get_link_snr(ctx, station, deststa) -
 				get_signal_offset_by_interference(ctx,

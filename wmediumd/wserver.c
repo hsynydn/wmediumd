@@ -506,6 +506,32 @@ int handle_add_request(struct request_ctx *ctx, station_add_request *request) {
     return ret;
 }
 
+int handle_medium_update_request(struct request_ctx *ctx, const medium_update_request *request) {
+    medium_update_response response;
+    response.request = *request;
+    struct station *sender = NULL;
+    struct station *station;
+
+    list_for_each_entry(station, &ctx->ctx->stations, list) {
+        if (memcmp(&request->sta_addr, station->addr, ETH_ALEN) == 0) {
+            sender = station;
+        }
+    }
+    w_logf(ctx->ctx, LOG_NOTICE, LOG_PREFIX "Performing Medium update: for=" MAC_FMT " to #%d\n",
+           MAC_ARGS(request->sta_addr), request->medium_id_);
+    if(sender!=NULL){
+        response.update_result = WUPDATE_SUCCESS;
+        pthread_rwlock_wrlock(&snr_lock);
+        sender->medium_id = request->medium_id_;
+        pthread_rwlock_unlock(&snr_lock);
+    }else{
+        response.update_result = WUPDATE_INTF_NOTFOUND;
+    }
+
+    int ret = wserver_send_msg(ctx->sock_fd, &response, medium_update_response);
+    return ret;
+}
+
 int parse_recv_msg_rest_error(struct wmediumd *ctx, int value) {
     if (value > 0) {
         return value;
@@ -597,7 +623,15 @@ int receive_handle_request(struct request_ctx *ctx) {
 		} else {
 			return handle_gaussian_random_update_request(ctx, &request);
 		}
-    } else {
+    } else if (recv_type == WSERVER_MEDIUM_UPDATE_REQUEST_TYPE) {
+        medium_update_request request;
+        if ((ret = wserver_recv_msg(ctx->sock_fd, &request, medium_update_request))) {
+            return parse_recv_msg_rest_error(ctx->ctx, ret);
+        } else {
+            return handle_medium_update_request(ctx, &request);
+        }
+    }
+    else {
         return -1;
     }
 }

@@ -103,6 +103,10 @@ void hton_station_add_request(station_add_request *elem);
 
 void hton_station_add_response(station_add_response *elem);
 
+void hton_medium_update_request(medium_update_request *elem);
+
+void hton_medium_update_response(medium_update_response *elem);
+
 void ntoh_base(wserver_msg *elem);
 
 void ntoh_snr_update_request(snr_update_request *elem);
@@ -144,5 +148,9 @@ void ntoh_station_del_by_id_response(station_del_by_id_response *elem);
 void ntoh_station_add_request(station_add_request *elem);
 
 void ntoh_station_add_response(station_add_response *elem);
+
+void ntoh_medium_update_request(medium_update_request *elem);
+
+void ntoh_medium_update_response(medium_update_response *elem);
 
 #endif //WMEDIUMD_WSERVER_MESSAGES_NETWORK_H

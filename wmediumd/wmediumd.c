@@ -235,7 +235,7 @@ static double milliwatt_to_dBm(double value)
 static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 				     int duration, int signal)
 {
-	int i;
+	int i, medium_id;
 
 	if (!ctx->intf)
 		return 0;
@@ -243,7 +243,10 @@ static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 	if (signal >= CCA_THRESHOLD)
 		return 0;
 
+    medium_id = ctx->sta_array[src_idx]->medium_id;
 	for (i = 0; i < ctx->num_stas; i++) {
+        if (medium_id != ctx->sta_array[i]->medium_id)
+            continue;
 		ctx->intf[ctx->num_stas * src_idx + i].duration += duration;
 		// use only latest value
 		ctx->intf[ctx->num_stas * src_idx + i].signal = signal;
@@ -255,16 +258,19 @@ static int set_interference_duration(struct wmediumd *ctx, int src_idx,
 static int get_signal_offset_by_interference(struct wmediumd *ctx, int src_idx,
 					     int dst_idx)
 {
-	int i;
+    int i, medium_id;
 	double intf_power;
 
 	if (!ctx->intf)
 		return 0;
 
 	intf_power = 0.0;
+    medium_id = ctx->sta_array[dst_idx]->medium_id;
 	for (i = 0; i < ctx->num_stas; i++) {
 		if (i == src_idx || i == dst_idx)
 			continue;
+        if (medium_id != ctx->sta_array[i]->medium_id)
+            continue;
 		if (drand48() < ctx->intf[i * ctx->num_stas + dst_idx].prob_col)
 			intf_power += dBm_to_milliwatt(
 				ctx->intf[i * ctx->num_stas + dst_idx].signal);
@@ -292,6 +298,36 @@ static struct station *get_station_by_addr(struct wmediumd *ctx, u8 *addr)
 	return NULL;
 }
 
+void detect_mediums(struct wmediumd *ctx, struct station *src, struct station *dest) {
+    int medium_id;
+    if (!ctx->enable_medium_detection){
+        return;
+    }
+    if(src->isap& !dest->isap){
+        // AP-STA Connection
+        medium_id = -src->index-1;
+    }else if((!src->isap)& dest->isap){
+        // STA-AP Connection
+        medium_id = -dest->index-1;
+    }else{
+        // AP-AP Connection
+        // STA-STA Connection
+        // TODO: Detect adhoc and mesh groups
+        return;
+    }
+    if (medium_id!=src->medium_id){
+        w_logf(ctx, LOG_DEBUG, "Setting medium id of " MAC_FMT "(%d|%s) to %d.\n",
+               MAC_ARGS(src->addr), src->index, src->isap ? "AP" : "Sta",
+               medium_id);
+        src-> medium_id = medium_id;
+    }
+    if(medium_id!=dest->medium_id){
+        w_logf(ctx, LOG_DEBUG, "Setting medium id of " MAC_FMT "(%d|%s) to %d.\n",
+               MAC_ARGS(dest->addr), dest->index, dest->isap ? "AP" : "Sta",
+               medium_id);
+        dest-> medium_id = medium_id;
+    }
+}
 void queue_frame(struct wmediumd *ctx, struct station *station,
 		 struct frame *frame)
 {
@@ -343,6 +379,10 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	} else {
 		deststa = get_station_by_addr(ctx, dest);
 		if (deststa) {
+            w_logf(ctx, LOG_DEBUG, "Packet from " MAC_FMT "(%d|%s) to " MAC_FMT "(%d|%s)\n",
+                   MAC_ARGS(station->addr), station->index, station->isap ? "AP" : "Sta",
+                   MAC_ARGS(deststa->addr), deststa->index, deststa->isap ? "AP" : "Sta");
+            detect_mediums(ctx,station,deststa);
 			snr = ctx->get_link_snr(ctx, station, deststa) -
 				get_signal_offset_by_interference(ctx,
 					station->index, deststa->index);
@@ -412,14 +452,22 @@ void queue_frame(struct wmediumd *ctx, struct station *station,
 	 * (or now, if none).
 	 */
 	target = now;
-	for (i = 0; i <= ac; i++) {
-		list_for_each_entry(tmpsta, &ctx->stations, list) {
-			tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
-						       struct frame, list);
-			if (tail && timespec_before(&target, &tail->expires))
-				target = tail->expires;
-		}
-	}
+    w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is #%d\n", MAC_ARGS(station->addr), station->medium_id);
+    list_for_each_entry(tmpsta, &ctx->stations, list) {
+        if (station->medium_id == tmpsta->medium_id) {
+            w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is also #%d\n", MAC_ARGS(tmpsta->addr),
+                   tmpsta->medium_id);
+            for (i = 0; i <= ac; i++) {
+                tail = list_last_entry_or_null(&tmpsta->queues[i].frames,
+                                               struct frame, list);
+                if (tail && timespec_before(&target, &tail->expires))
+                    target = tail->expires;
+            }
+        } else {
+            w_logf(ctx, LOG_DEBUG, "Sta " MAC_FMT " medium is not #%d, it is #%d\n", MAC_ARGS(tmpsta->addr),
+                   station->medium_id, tmpsta->medium_id);
+        }
+    }
 
 	timespec_add_usec(&target, send_time);
 
@@ -627,7 +675,8 @@ void deliver_expired_frames(struct wmediumd *ctx)
 	struct timespec now, _diff;
 	struct station *station;
 	struct list_head *l;
-	int i, j, duration;
+    int i, j, duration;
+    int sta1_medium_id;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	list_for_each_entry(station, &ctx->stations, list) {
@@ -657,16 +706,20 @@ void deliver_expired_frames(struct wmediumd *ctx)
 		return;
 
 	// update interference
-	for (i = 0; i < ctx->num_stas; i++)
-		for (j = 0; j < ctx->num_stas; j++) {
-			if (i == j)
-				continue;
-			// probability is used for next calc
-			ctx->intf[i * ctx->num_stas + j].prob_col =
-				ctx->intf[i * ctx->num_stas + j].duration /
-				(double)duration;
-			ctx->intf[i * ctx->num_stas + j].duration = 0;
-		}
+	for (i = 0; i < ctx->num_stas; i++){
+        sta1_medium_id = ctx->sta_array[i]->medium_id;
+        for (j = 0; j < ctx->num_stas; j++) {
+            if (i == j)
+                continue;
+            if (sta1_medium_id != ctx->sta_array[j]->medium_id)
+                continue;
+            // probability is used for next calc
+            ctx->intf[i * ctx->num_stas + j].prob_col =
+                    ctx->intf[i * ctx->num_stas + j].duration /
+                    (double)duration;
+            ctx->intf[i * ctx->num_stas + j].duration = 0;
+        }
+    }
 
 	clock_gettime(CLOCK_MONOTONIC, &ctx->intf_updated);
 }
@@ -677,7 +730,7 @@ int nl_err_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg)
 	struct genlmsghdr *gnlh = nlmsg_data(&nlerr->msg);
 	struct wmediumd *ctx = arg;
 
-	w_flogf(ctx, LOG_ERR, stderr, "nl: cmd %d, seq %d: %s\n", gnlh->cmd,
+	w_flogf(ctx, LOG_DEBUG, stderr, "nl: cmd %d, seq %d: %s\n", gnlh->cmd,
 			nlerr->msg.nlmsg_seq, strerror(abs(nlerr->error)));
 
 	return NL_SKIP;

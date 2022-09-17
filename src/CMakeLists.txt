@@ -1,0 +1,24 @@
+set(WMEDIUMD_SOURCES
+        ${WMEDIUMD_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/config.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/per.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/wmediumd.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/wmediumd_dynamic.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/wserver.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/wserver_messages.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/wserver_messages_network.c
+        PARENT_SCOPE
+        )
+
+set(WMEDIUMD_HEADERS
+        ${WMEDIUMD_HEADERS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/config.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/ieee80211.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/list.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/wmediumd.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/wmediumd_dynamic.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/wserver.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/wserver_messages.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/wserver_messages_network.h
+        PARENT_SCOPE
+        )

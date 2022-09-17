@@ -18,7 +18,7 @@
  *	02110-1301, USA.
  */
 
-#include "../wmediumd/wserver_messages.h"
+#include "../src/wserver_messages.h"
 #include <stdlib.h>
 #include <sys/un.h>
 #include <stdio.h>
